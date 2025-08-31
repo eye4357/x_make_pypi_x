@@ -1,10 +1,10 @@
 from __future__ import annotations
+
+import configparser
 import os
 import shutil
 import subprocess
 import textwrap
-from typing import List
-import configparser
 
 
 class x_cls_make_pypi_x:
@@ -36,7 +36,7 @@ class x_cls_make_pypi_x:
     - Increment the version number in `setup.py` if this is not the first release.
     - Ensure your Python file contains the necessary package structure and code.
     - Test your package locally to confirm it works as expected.
-    - Create accounts on PyPI and TestPyPI if you don’t already have them.
+    - Create accounts on PyPI and TestPyPI if you don't already have them.
 
     Steps to Create PyPI and TestPyPI Accounts:
     1. Go to the PyPI website: https://pypi.org/account/register/.
@@ -62,7 +62,7 @@ class x_cls_make_pypi_x:
         email: str,
         description: str,
         license_text: str,
-        dependencies: List[str],
+        dependencies: list[str],
         cleanup_evidence: bool = True,
         dry_run: bool = False,
     ) -> None:
@@ -113,7 +113,7 @@ class x_cls_make_pypi_x:
         # Keep pretty indentation in source; remove common leading whitespace for output
         return textwrap.dedent(multiline_string).lstrip("\n").rstrip() + "\n"
 
-    def create_files(self, python_file: str, ancillary_files: List[str]) -> None:
+    def create_files(self, python_file: str, ancillary_files: list[str]) -> None:
         """Create LICENSE, README, setup.py, requirements.txt, .pypirc, and include ancillary files."""
         project_dir = os.path.dirname(python_file)
         os.chdir(project_dir)
@@ -176,7 +176,7 @@ class x_cls_make_pypi_x:
         # Determine common root for preserving relative structure (fallback for cross-drive paths on Windows)
         if ancillary_files:
             try:
-                common_root = os.path.commonpath([python_file] + ancillary_files)
+                common_root = os.path.commonpath([python_file, *ancillary_files])
             except ValueError:
                 common_root = os.path.dirname(python_file)
         else:
@@ -334,7 +334,7 @@ class x_cls_make_pypi_x:
             print("Full output:", e.output)
             return False
 
-    def prepare(self, main_python_file: str, ancillary_files: List[str]) -> None:
+    def prepare(self, main_python_file: str, ancillary_files: list[str]) -> None:
         """Prepare the environment by validating files and cleaning up."""
         # Check for the existence of the main Python file
         if not os.path.exists(main_python_file):
@@ -346,7 +346,7 @@ class x_cls_make_pypi_x:
 
         # Parse all files recursively in the parent directory of the main Python file
         parent_dir = os.path.dirname(main_python_file)
-        all_files: List[str] = []
+        all_files: list[str] = []
         for root, _, files in os.walk(parent_dir):
             for file in files:
                 all_files.append(os.path.normpath(os.path.join(root, file)))
@@ -386,7 +386,7 @@ class x_cls_make_pypi_x:
                     print(f"Deleting empty directory: {dir_path}")
                     os.rmdir(dir_path)
 
-    def publish(self, main_python_file: str, ancillary_files: List[str]) -> None:
+    def publish(self, main_python_file: str, ancillary_files: list[str]) -> None:
         """Publish the package to PyPI."""
         # Create necessary files
         self.create_files(main_python_file, ancillary_files)
@@ -434,7 +434,7 @@ class x_cls_make_pypi_x:
             self.run_subprocess(pypi_cmd)
 
     def prepare_and_publish(
-        self, main_python_file: str, ancillary_files: List[str]
+        self, main_python_file: str, ancillary_files: list[str]
     ) -> None:
         """Run the steps to prepare and publish the package to PyPI."""
         if self.cleanup_evidence:
@@ -450,6 +450,6 @@ class x_cls_make_pypi_x:
 
 
 if __name__ == "__main__":
-    assert False, "This file is not meant to be run directly."
+    raise SystemExit("This file is not meant to be run directly.")
 else:
     pass
