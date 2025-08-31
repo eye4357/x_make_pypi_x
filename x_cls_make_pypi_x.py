@@ -74,9 +74,7 @@ class x_cls_make_pypi_x:
         self.license_text = license_text
         self.dependencies = dependencies
         # Class variable to control evidence deletion behavior
-        self.cleanup_evidence = (
-            cleanup_evidence  # Set to False to skip evidence deletion
-        )
+        self.cleanup_evidence = cleanup_evidence  # Set to False to skip evidence deletion
         # Class variable to control dry-run behavior (no upload, token prompts skipped)
         self.dry_run = dry_run
         # Resolve API tokens at initialization (skip in dry-run). Tokens are read from env vars.
@@ -92,9 +90,7 @@ class x_cls_make_pypi_x:
                 or os.environ.get("TEST_PYPI_TOKEN")
                 or ""
             )
-            self.pypi_token = (
-                os.environ.get("PYPI_API_TOKEN") or os.environ.get("PYPI_TOKEN") or ""
-            )
+            self.pypi_token = os.environ.get("PYPI_API_TOKEN") or os.environ.get("PYPI_TOKEN") or ""
             if not self.testpypi_token:
                 raise ValueError(
                     "Missing TestPyPI token. Set the TESTPYPI_API_TOKEN environment variable before running."
@@ -248,9 +244,7 @@ class x_cls_make_pypi_x:
             pass
 
         # requirements.txt (for reference)
-        with open(
-            os.path.join(dist_dir, "requirements.txt"), "w", encoding="utf-8"
-        ) as f:
+        with open(os.path.join(dist_dir, "requirements.txt"), "w", encoding="utf-8") as f:
             f.write("\n".join(self.dependencies))
 
         # .pypirc
@@ -301,9 +295,7 @@ class x_cls_make_pypi_x:
 
         # Save .pypirc in the user's home directory (skip in dry-run to avoid overwriting)
         if not self.dry_run:
-            home_pypirc_path = os.path.join(
-                os.environ.get("USERPROFILE", ""), ".pypirc"
-            )
+            home_pypirc_path = os.path.join(os.environ.get("USERPROFILE", ""), ".pypirc")
             if home_pypirc_path:
                 with open(home_pypirc_path, "w", encoding="utf-8") as f:
                     f.write(pypirc_content)
@@ -322,9 +314,7 @@ class x_cls_make_pypi_x:
     def run_subprocess(self, command: str) -> bool:
         """Run a subprocess command and print its output. Returns True on success, False on failure."""
         try:
-            result = subprocess.run(
-                command, shell=True, check=True, text=True, capture_output=True
-            )
+            result = subprocess.run(command, shell=True, check=True, text=True, capture_output=True)
             print("Subprocess output:", result.stdout)
             return True
         except subprocess.CalledProcessError as e:
@@ -338,9 +328,7 @@ class x_cls_make_pypi_x:
         """Prepare the environment by validating files and cleaning up."""
         # Check for the existence of the main Python file
         if not os.path.exists(main_python_file):
-            raise FileNotFoundError(
-                f"Main Python file '{main_python_file}' does not exist."
-            )
+            raise FileNotFoundError(f"Main Python file '{main_python_file}' does not exist.")
 
         print(f"Main Python file found: {main_python_file}")
 
@@ -371,10 +359,7 @@ class x_cls_make_pypi_x:
 
         # Delete any file that is not the main Python file or an ancillary file
         for file_path in all_files:
-            if (
-                file_path != os.path.normpath(main_python_file)
-                and file_path not in ancillary_files
-            ):
+            if file_path != os.path.normpath(main_python_file) and file_path not in ancillary_files:
                 print(f"Deleting unrelated file: {file_path}")
                 os.remove(file_path)
 
@@ -433,9 +418,7 @@ class x_cls_make_pypi_x:
             print(f"Running command: {pypi_cmd}")
             self.run_subprocess(pypi_cmd)
 
-    def prepare_and_publish(
-        self, main_python_file: str, ancillary_files: list[str]
-    ) -> None:
+    def prepare_and_publish(self, main_python_file: str, ancillary_files: list[str]) -> None:
         """Run the steps to prepare and publish the package to PyPI."""
         if self.cleanup_evidence:
             # Cleanup before publishing
