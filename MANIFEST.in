@@ -1,0 +1,3 @@
+recursive-include x_make_pypi_x *
+include docs/README.md
+include LICENSE
