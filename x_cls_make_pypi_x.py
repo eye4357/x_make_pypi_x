@@ -357,19 +357,43 @@ class x_cls_make_pypi_x:
 
         print("All ancillary files are present in the directory structure.")
 
-        # Delete any file that is not the main Python file or an ancillary file
-        for file_path in all_files:
-            if file_path != os.path.normpath(main_python_file) and file_path not in ancillary_files:
-                print(f"Deleting unrelated file: {file_path}")
-                os.remove(file_path)
+        # Define git-critical files/folders to always preserve
+        GIT_CRITICAL = {
+            ".git",
+            ".gitignore",
+            ".gitattributes",
+            ".github",
+            ".pre-commit-config.yaml",
+            "pyproject.toml",
+        }
 
-        # Delete all empty directories
+        def is_git_critical(path: str) -> bool:
+            parts = set(os.path.normpath(path).split(os.sep))
+            return any(item in parts for item in GIT_CRITICAL)
+
+        # Delete any file that is not the main Python file, an ancillary file, or git-critical
+        for file_path in all_files:
+            if (
+                file_path != os.path.normpath(main_python_file)
+                and file_path not in ancillary_files
+                and not is_git_critical(file_path)
+            ):
+                print(f"Deleting unrelated file: {file_path}")
+                try:
+                    os.remove(file_path)
+                except Exception as e:
+                    print(f"Failed to delete {file_path}: {e}")
+
+        # Delete all empty directories except git-critical ones
         for root, dirs, _ in os.walk(parent_dir, topdown=False):
             for dir in dirs:
                 dir_path = os.path.join(root, dir)
-                if not os.listdir(dir_path):
+                if not os.listdir(dir_path) and not is_git_critical(dir_path):
                     print(f"Deleting empty directory: {dir_path}")
-                    os.rmdir(dir_path)
+                    try:
+                        os.rmdir(dir_path)
+                    except Exception as e:
+                        print(f"Failed to delete directory {dir_path}: {e}")
 
     def publish(self, main_python_file: str, ancillary_files: list[str]) -> None:
         """Publish the package to PyPI."""
