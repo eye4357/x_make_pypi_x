@@ -371,29 +371,7 @@ class x_cls_make_pypi_x:
             parts = set(os.path.normpath(path).split(os.sep))
             return any(item in parts for item in GIT_CRITICAL)
 
-        # Delete any file that is not the main Python file, an ancillary file, or git-critical
-        for file_path in all_files:
-            if (
-                file_path != os.path.normpath(main_python_file)
-                and file_path not in ancillary_files
-                and not is_git_critical(file_path)
-            ):
-                print(f"Deleting unrelated file: {file_path}")
-                try:
-                    os.remove(file_path)
-                except Exception as e:
-                    print(f"Failed to delete {file_path}: {e}")
-
-        # Delete all empty directories except git-critical ones
-        for root, dirs, _ in os.walk(parent_dir, topdown=False):
-            for dir in dirs:
-                dir_path = os.path.join(root, dir)
-                if not os.listdir(dir_path) and not is_git_critical(dir_path):
-                    print(f"Deleting empty directory: {dir_path}")
-                    try:
-                        os.rmdir(dir_path)
-                    except Exception as e:
-                        print(f"Failed to delete directory {dir_path}: {e}")
+    # Deletion logic removed: this function no longer deletes any files or directories.
 
     def publish(self, main_python_file: str, ancillary_files: list[str]) -> None:
         """Publish the package to PyPI."""
