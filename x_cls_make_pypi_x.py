@@ -73,33 +73,57 @@ class x_cls_make_pypi_x:
         self.description = description
         self.license_text = license_text
         self.dependencies = dependencies
-        # Class variable to control evidence deletion behavior
-        self.cleanup_evidence = cleanup_evidence  # Set to False to skip evidence deletion
-        # Class variable to control dry-run behavior (no upload, token prompts skipped)
+        self.cleanup_evidence = cleanup_evidence
         self.dry_run = dry_run
-        # Resolve API tokens at initialization (skip in dry-run). Tokens are read from env vars.
+        # Token loading logic from registry/user env
+        def _mask(token: str | None, head: int = 6, tail: int = 4) -> str:
+            if not token:
+                return ""
+            t = str(token)
+            if len(t) <= head + tail:
+                return "*" * len(t)
+            return f"{t[:head]}...{t[-tail:]}"
+
+        def _get_user_env(var: str) -> str | None:
+            try:
+                import winreg
+            except Exception:
+                return None
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment") as key:
+                    val, _ = winreg.QueryValueEx(key, var)
+                    if isinstance(val, str) and val:
+                        return val
+                    return None
+            except Exception:
+                return None
+
+        def _ensure(keys: list[str]) -> str | None:
+            for k in keys:
+                v = os.environ.get(k)
+                if v:
+                    return v
+            primary = keys[0]
+            v = _get_user_env(primary)
+            if v:
+                os.environ[primary] = v
+                return v
+            return None
+
         if self.dry_run:
             self.pypi_token = ""
             self.testpypi_token = ""
             print("Dry run mode: skipping token prompts and uploads.")
         else:
-            # Read tokens from environment variables
-            self.testpypi_token = (
-                os.environ.get("TESTPYPI_API_TOKEN")
-                or os.environ.get("TEST_PYPI_API_TOKEN")
-                or os.environ.get("TEST_PYPI_TOKEN")
-                or ""
-            )
-            self.pypi_token = os.environ.get("PYPI_API_TOKEN") or os.environ.get("PYPI_TOKEN") or ""
+            test_key_candidates = ["TESTPYPI_API_TOKEN", "TEST_PYPI_API_TOKEN", "TEST_PYPI_TOKEN"]
+            pypi_key_candidates = ["PYPI_API_TOKEN", "PYPI_TOKEN"]
+            self.testpypi_token = _ensure(test_key_candidates) or ""
+            self.pypi_token = _ensure(pypi_key_candidates) or ""
+            print(f"Env tokens - TESTPYPI: {'set' if self.testpypi_token else 'missing'} {_mask(self.testpypi_token)} | PYPI: {'set' if self.pypi_token else 'missing'} {_mask(self.pypi_token)}")
             if not self.testpypi_token:
-                raise ValueError(
-                    "Missing TestPyPI token. Set the TESTPYPI_API_TOKEN environment variable before running."
-                )
+                raise ValueError("Missing TestPyPI token. Set the TESTPYPI_API_TOKEN environment variable before running.")
             if not self.pypi_token:
-                raise ValueError(
-                    "Missing PyPI token. Set the PYPI_API_TOKEN environment variable before running."
-                )
-            print("API tokens loaded from environment for TestPyPI and PyPI.")
+                raise ValueError("Missing PyPI token. Set the PYPI_API_TOKEN environment variable before running.")
 
     # Interactive token prompts removed; tokens now come from environment variables.
 
