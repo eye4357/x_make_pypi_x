@@ -83,13 +83,14 @@ class x_cls_make_pypi_x:
         """
         package_name = self.name
         parent_dir = os.path.dirname(os.path.abspath(main_file))
-        package_dir = os.path.join(parent_dir, package_name)
-        # Always remove the target package folder before copying to avoid WinError 183
-        if os.path.exists(package_dir):
+        build_dir = os.path.join(parent_dir, f"_build_{package_name}")
+        package_dir = os.path.join(build_dir, package_name)
+        # Remove build dir if exists
+        if os.path.exists(build_dir):
             try:
-                shutil.rmtree(package_dir)
+                shutil.rmtree(build_dir)
             except Exception as e:
-                print(f"Warning: Could not remove {package_dir}: {e}")
+                print(f"Warning: Could not remove {build_dir}: {e}")
         os.makedirs(package_dir, exist_ok=True)
         # Copy main file as <package>/<main_file>
         shutil.copy2(main_file, os.path.join(package_dir, os.path.basename(main_file)))
@@ -106,7 +107,7 @@ class x_cls_make_pypi_x:
             elif os.path.isfile(ancillary_path):
                 shutil.copy2(ancillary_path, os.path.join(package_dir, os.path.basename(ancillary_path)))
         # Set project_dir for build/publish
-        self._project_dir = parent_dir
+        self._project_dir = build_dir
 
     def prepare(self, main_file: str, ancillary_files: list[str]) -> None:
         if not os.path.exists(main_file):
