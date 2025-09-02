@@ -3,8 +3,21 @@ import os
 import shutil
 import textwrap
 import sys
+import stat
+import tempfile
 
 class x_cls_make_pypi_x:
+    def version_exists_on_pypi(self) -> bool:
+        """Check if the current package name and version already exist on PyPI."""
+        import urllib.request, json
+        url = f"https://pypi.org/pypi/{self.name}/json"
+        try:
+            with urllib.request.urlopen(url) as response:
+                data = json.load(response)
+            return self.version in data.get("releases", {})
+        except Exception as e:
+            print(f"WARNING: Could not check PyPI for {self.name}=={self.version}: {e}")
+            return False
     """
     Minimal PyPI publisher: Only copies the main file, ancillary files, and preserves CI files. No legacy packaging files are created or required.
     """
@@ -81,17 +94,105 @@ class x_cls_make_pypi_x:
         """
         Create a minimal package directory named after the package, copy the explicit main file and ancillary files, and ensure __init__.py exists.
         """
+        import tempfile, stat, traceback, time
         package_name = self.name
-        parent_dir = os.path.dirname(os.path.abspath(main_file))
-        build_dir = os.path.join(parent_dir, f"_build_{package_name}")
+        # Use a custom build directory inside the repo for diagnostics
+        repo_build_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "_build_temp_x_pypi_x"))
+        if not os.path.exists(repo_build_root):
+            os.makedirs(repo_build_root, exist_ok=True)
+        import uuid
+        build_dir = os.path.join(repo_build_root, f"_build_{package_name}_{uuid.uuid4().hex}")
+        os.makedirs(build_dir, exist_ok=True)
         package_dir = os.path.join(build_dir, package_name)
-        # Remove build dir if exists
-        if os.path.exists(build_dir):
+
+        def print_stat_info(path: str):
+            print(f"STAT: {path}")
+            print(f"  Exists: {os.path.lexists(path)}")
+            print(f"  Symlink: {os.path.islink(path)}")
+            print(f"  File: {os.path.isfile(path)}")
+            print(f"  Dir: {os.path.isdir(path)}")
             try:
-                shutil.rmtree(build_dir)
+                print(f"  Stat: {os.stat(path)}")
             except Exception as e:
-                print(f"Warning: Could not remove {build_dir}: {e}")
-        os.makedirs(package_dir, exist_ok=True)
+                print(f"  Stat failed: {e}")
+
+        def force_remove_any(path: str) -> None:
+            """Remove any file, symlink, or folder at path, with verbose stat diagnostics."""
+            print(f"Attempting to remove: {path}")
+            print_stat_info(path)
+            try:
+                if os.path.islink(path):
+                    os.unlink(path)
+                elif os.path.isfile(path):
+                    os.remove(path)
+                elif os.path.isdir(path):
+                    shutil.rmtree(path, onexc=lambda func, p, exc_info: os.chmod(p, stat.S_IWRITE) or func(p))
+            except Exception as e:
+                print(f"ERROR: Could not forcibly remove {path}: {e}")
+                traceback.print_exc()
+            print(f"After removal attempt:")
+            print_stat_info(path)
+
+        # Remove and verify both build_dir and package_dir
+        for path in [package_dir, build_dir]:
+            if os.path.lexists(path):
+                force_remove_any(path)
+                if os.path.lexists(path):
+                    print(f"FATAL: {path} still exists after attempted removal. Aborting.")
+                    raise RuntimeError(f"Could not remove: {path}")
+
+        # Recreate build dir
+        os.makedirs(build_dir, exist_ok=True)
+
+        # Remove any file, folder, or symlink named package_dir before creation
+        if os.path.lexists(package_dir):
+            print(f"DIAGNOSTIC: {package_dir} exists before creation.")
+            print_stat_info(package_dir)
+            force_remove_any(package_dir)
+            time.sleep(1)
+            if os.path.lexists(package_dir):
+                print(f"WARNING: {package_dir} still exists after first forced removal and delay.")
+                print_stat_info(package_dir)
+                print(f"Attempting final forced removal and longer delay...")
+                force_remove_any(package_dir)
+                time.sleep(2)
+                if os.path.lexists(package_dir):
+                    print(f"FATAL: {package_dir} still exists after final forced removal and delay.")
+                    print_stat_info(package_dir)
+                    print(f"Contents of parent build directory:")
+                    for item in os.listdir(build_dir):
+                        print(f" - {item}")
+                    raise RuntimeError(f"Could not remove package_dir: {package_dir}")
+
+        # Create the package dir only if it does not exist
+        print(f"DIAGNOSTIC: About to create {package_dir} if needed.")
+        print_stat_info(package_dir)
+        if not os.path.exists(package_dir):
+            try:
+                os.makedirs(package_dir, exist_ok=True)
+            except OSError as e:
+                print(f"FATAL: Could not create {package_dir}: {e}")
+                print_stat_info(package_dir)
+                if os.path.lexists(package_dir):
+                    print(f"Contents of parent build directory:")
+                    for item in os.listdir(build_dir):
+                        print(f" - {item}")
+                raise
+        else:
+            print(f"INFO: {package_dir} already exists as a directory, proceeding.")
+
+        # After ancillary file copying, ensure only a directory exists at package_dir
+        print(f"DIAGNOSTIC: After ancillary file copy, checking {package_dir}.")
+        print_stat_info(package_dir)
+        if os.path.lexists(package_dir) and not os.path.isdir(package_dir):
+            print(f"WARNING: {package_dir} is not a directory after ancillary file copy. Forcing removal.")
+            force_remove_any(package_dir)
+            time.sleep(1)
+            if os.path.lexists(package_dir):
+                print(f"FATAL: {package_dir} still exists after forced removal post ancillary copy.")
+                print_stat_info(package_dir)
+                raise RuntimeError(f"Could not ensure package_dir is a directory: {package_dir}")
+
         # Copy main file as <package>/<main_file>
         shutil.copy2(main_file, os.path.join(package_dir, os.path.basename(main_file)))
         # Ensure __init__.py exists
@@ -103,11 +204,40 @@ class x_cls_make_pypi_x:
         for ancillary_path in ancillary_files:
             if os.path.isdir(ancillary_path):
                 dest = os.path.join(package_dir, os.path.basename(ancillary_path))
+                # Remove destination if it exists to avoid copytree error
+                if os.path.lexists(dest):
+                    print(f"DIAGNOSTIC: Ancillary destination {dest} exists before copy. Removing...")
+                    print_stat_info(dest)
+                    force_remove_any(dest)
+                    time.sleep(0.5)
                 shutil.copytree(ancillary_path, dest)
             elif os.path.isfile(ancillary_path):
                 shutil.copy2(ancillary_path, os.path.join(package_dir, os.path.basename(ancillary_path)))
         # Set project_dir for build/publish
         self._project_dir = build_dir
+
+        # Ensure pyproject.toml exists in build_dir
+        pyproject_path = os.path.join(build_dir, "pyproject.toml")
+        if not os.path.exists(pyproject_path):
+            # Use SPDX identifier (e.g., "MIT") for license field
+            spdx_license = "MIT" if "MIT" in self.license_text else self.license_text.splitlines()[0] if self.license_text else ""
+            pyproject_content = (
+                f"[project]\n"
+                f"name = \"{self.name}\"\n"
+                f"version = \"{self.version}\"\n"
+                f"description = \"{self.description}\"\n"
+                f"authors = [{{name = \"{self.author}\", email = \"{self.email}\"}}]\n"
+                f"license = \"{spdx_license}\"\n"
+                f"dependencies = {self.dependencies if self.dependencies else []}\n"
+            )
+            with open(pyproject_path, "w", encoding="utf-8") as f:
+                f.write(pyproject_content)
+
+            # Optionally, write full license text to LICENSE file in package_dir
+            if self.license_text:
+                license_file_path = os.path.join(package_dir, "LICENSE")
+                with open(license_file_path, "w", encoding="utf-8") as lf:
+                    lf.write(self.license_text)
 
     def prepare(self, main_file: str, ancillary_files: list[str]) -> None:
         if not os.path.exists(main_file):
@@ -120,6 +250,10 @@ class x_cls_make_pypi_x:
         print("All ancillary files are present.")
 
     def publish(self, main_file: str, ancillary_files: list[str]) -> None:
+        # Check if version already exists on PyPI
+        if self.version_exists_on_pypi():
+            print(f"SKIP: {self.name} version {self.version} already exists on PyPI. Skipping publish.")
+            return
         self.create_files(main_file, ancillary_files)
         print("Main and ancillary files copied. Updating pyproject.toml...")
         project_dir = self._project_dir
