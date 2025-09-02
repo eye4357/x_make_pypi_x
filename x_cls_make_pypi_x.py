@@ -77,44 +77,47 @@ class x_cls_make_pypi_x:
         if not version_match or not version_match.group(1).strip():
             raise RuntimeError("pyproject.toml missing or empty 'version' in [project] section after update.")
 
-    def create_files(self, python_file: str, ancillary_files: list[str]) -> None:
-        """Copy main code and ancillary files only. If ancillary is a folder, copy recursively."""
-        project_dir = os.path.dirname(python_file)
-        os.chdir(project_dir)
-        selected_script_name = os.path.basename(python_file)
-        destination_script_path = os.path.join(project_dir, selected_script_name)
-        if os.path.abspath(python_file) != os.path.abspath(destination_script_path):
-            shutil.copy2(python_file, destination_script_path)
+    def create_files(self, main_file: str, ancillary_files: list[str]) -> None:
+        """
+        Create a minimal package directory named after the package, copy the explicit main file and ancillary files, and ensure __init__.py exists.
+        """
+        package_name = self.name
+        parent_dir = os.path.dirname(os.path.abspath(main_file))
+        package_dir = os.path.join(parent_dir, package_name)
+        if os.path.exists(package_dir):
+            shutil.rmtree(package_dir)
+        os.makedirs(package_dir, exist_ok=True)
+        # Copy main file as <package>/<main_file>
+        shutil.copy2(main_file, os.path.join(package_dir, os.path.basename(main_file)))
+        # Ensure __init__.py exists
+        init_path = os.path.join(package_dir, "__init__.py")
+        if not os.path.exists(init_path):
+            with open(init_path, "w", encoding="utf-8") as f:
+                f.write("# Package init\n")
+        # Copy ancillary files/folders into package dir
         for ancillary_path in ancillary_files:
             if os.path.isdir(ancillary_path):
-                for root, _, files in os.walk(ancillary_path):
-                    rel_root = os.path.relpath(root, os.path.dirname(ancillary_path))
-                    dest_root = os.path.join(project_dir, os.path.basename(ancillary_path), rel_root)
-                    os.makedirs(dest_root, exist_ok=True)
-                    for file in files:
-                        src_file = os.path.join(root, file)
-                        dest_file = os.path.join(dest_root, file)
-                        if os.path.abspath(src_file) != os.path.abspath(dest_file):
-                            shutil.copy2(src_file, dest_file)
+                dest = os.path.join(package_dir, os.path.basename(ancillary_path))
+                shutil.copytree(ancillary_path, dest)
             elif os.path.isfile(ancillary_path):
-                destination_path = os.path.join(project_dir, os.path.basename(ancillary_path))
-                if os.path.abspath(ancillary_path) != os.path.abspath(destination_path):
-                    shutil.copy2(ancillary_path, destination_path)
+                shutil.copy2(ancillary_path, os.path.join(package_dir, os.path.basename(ancillary_path)))
+        # Set project_dir for build/publish
+        self._project_dir = parent_dir
 
-    def prepare(self, main_python_file: str, ancillary_files: list[str]) -> None:
-        if not os.path.exists(main_python_file):
-            raise FileNotFoundError(f"Main Python file '{main_python_file}' does not exist.")
-        print(f"Main Python file found: {main_python_file}")
+    def prepare(self, main_file: str, ancillary_files: list[str]) -> None:
+        if not os.path.exists(main_file):
+            raise FileNotFoundError(f"Main file '{main_file}' does not exist.")
+        print(f"Main file found: {main_file}")
         for ancillary_file in ancillary_files:
             if not os.path.exists(ancillary_file):
                 print(f"Expected ancillary file not found: {ancillary_file}")
                 raise FileNotFoundError(f"Ancillary file '{ancillary_file}' is not found.")
         print("All ancillary files are present.")
 
-    def publish(self, main_python_file: str, ancillary_files: list[str]) -> None:
-        self.create_files(main_python_file, ancillary_files)
+    def publish(self, main_file: str, ancillary_files: list[str]) -> None:
+        self.create_files(main_file, ancillary_files)
         print("Main and ancillary files copied. Updating pyproject.toml...")
-        project_dir = os.path.dirname(main_python_file)
+        project_dir = self._project_dir
         self.update_pyproject_toml(project_dir)
         os.chdir(project_dir)
         # Clean dist/ before build
@@ -175,12 +178,12 @@ class x_cls_make_pypi_x:
             print(f"Exception during Twine upload: {e}")
             raise
 
-    def prepare_and_publish(self, main_python_file: str, ancillary_files: list[str]) -> None:
+    def prepare_and_publish(self, main_file: str, ancillary_files: list[str]) -> None:
         if self.cleanup_evidence:
-            self.prepare(main_python_file, ancillary_files)
-        self.publish(main_python_file, ancillary_files)
+            self.prepare(main_file, ancillary_files)
+        self.publish(main_file, ancillary_files)
         if self.cleanup_evidence:
-            self.prepare(main_python_file, ancillary_files)
+            self.prepare(main_file, ancillary_files)
 
 if __name__ == "__main__":
     raise SystemExit("This file is not meant to be run directly.")
