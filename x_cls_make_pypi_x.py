@@ -31,7 +31,7 @@ class x_cls_make_pypi_x:
         self.dry_run = dry_run
 
     def update_pyproject_toml(self, project_dir: str) -> None:
-        """Update pyproject.toml with the correct name and version before building."""
+        """Update pyproject.toml with the correct name and version before building. Print and validate after update."""
         pyproject_path = os.path.join(project_dir, "pyproject.toml")
         if not os.path.exists(pyproject_path):
             print(f"No pyproject.toml found in {project_dir}, skipping update.")
@@ -63,6 +63,19 @@ class x_cls_make_pypi_x:
         with open(pyproject_path, "w", encoding="utf-8") as f:
             f.writelines(new_lines)
         print(f"Updated pyproject.toml with name={self.name}, version={self.version}")
+        # Print and validate pyproject.toml
+        with open(pyproject_path, "r", encoding="utf-8") as f:
+            contents = f.read()
+        print("pyproject.toml after update:")
+        print(contents)
+        # Validate [project] section
+        import re
+        name_match = re.search(r'^name\s*=\s*"(.+)"', contents, re.MULTILINE)
+        version_match = re.search(r'^version\s*=\s*"(.+)"', contents, re.MULTILINE)
+        if not name_match or not name_match.group(1).strip():
+            raise RuntimeError("pyproject.toml missing or empty 'name' in [project] section after update.")
+        if not version_match or not version_match.group(1).strip():
+            raise RuntimeError("pyproject.toml missing or empty 'version' in [project] section after update.")
 
     def create_files(self, python_file: str, ancillary_files: list[str]) -> None:
         """Copy main code and ancillary files only. If ancillary is a folder, copy recursively."""
