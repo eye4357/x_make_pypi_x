@@ -134,145 +134,19 @@ class x_cls_make_pypi_x:
         return textwrap.dedent(multiline_string).lstrip("\n").rstrip() + "\n"
 
     def create_files(self, python_file: str, ancillary_files: list[str]) -> None:
-        """Create LICENSE, README, setup.py, requirements.txt, .pypirc, and include ancillary files."""
+        """Copy main code and ancillary files only."""
         project_dir = os.path.dirname(python_file)
         os.chdir(project_dir)
 
-        # Ensure dist directory exists for build artifacts in the same directory as the main Python file
-        dist_dir = os.path.join(os.path.dirname(python_file), "dist")
-        os.makedirs(dist_dir, exist_ok=True)
-
-        # Create subdirectories for organization
-        docs_dir = os.path.join(project_dir, "docs")
-        os.makedirs(docs_dir, exist_ok=True)
-
-        # LICENSE in docs/
-        license_text = self.dedent_multiline(
-            """
-            MIT License
-
-            Copyright (c) 2025 [Your Name or Organization]
-
-            Permission is hereby granted, free of charge, to any person obtaining a copy
-            of this software and associated documentation files (the "Software"), to deal
-            in the Software without restriction, including without limitation the rights
-            to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-            copies of the Software, and to permit persons to whom the Software is
-            furnished to do so, subject to the following conditions:
-
-            The above copyright notice and this permission notice shall be included in all
-            copies or substantial portions of the Software.
-
-            THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-            IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-            FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-            AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-            LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-            OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-            SOFTWARE.
-            """
-        )
-        with open(os.path.join(docs_dir, "LICENSE"), "w", encoding="utf-8") as f:
-            f.write(license_text)
-
-        # README
-        with open(os.path.join(docs_dir, "README.md"), "w", encoding="utf-8") as f:
-            f.write(f"# {self.name}\n\n{self.dedent_multiline(self.description)}\n")
-
-        # Derive a valid package (module) name from the provided distribution name
-        package_name = self.name.replace("-", "_")
-        # Package directory and __init__
-        package_dir = os.path.join(project_dir, package_name)
-        os.makedirs(package_dir, exist_ok=True)
-        with open(os.path.join(package_dir, "__init__.py"), "w", encoding="utf-8") as f:
-            f.write(f"# This is the __init__.py file for the {package_name} package")
-
         # Copy main script
         selected_script_name = os.path.basename(python_file)
-        destination_script_path = os.path.join(package_dir, selected_script_name)
+        destination_script_path = os.path.join(project_dir, selected_script_name)
         shutil.copy2(python_file, destination_script_path)
 
-        # Copy ancillary files preserving relative structure
-        # Determine common root for preserving relative structure (fallback for cross-drive paths on Windows)
-        if ancillary_files:
-            try:
-                common_root = os.path.commonpath([python_file, *ancillary_files])
-            except ValueError:
-                common_root = os.path.dirname(python_file)
-        else:
-            common_root = os.path.dirname(python_file)
+        # Copy ancillary files
         for ancillary_file in ancillary_files:
-            relative_path = os.path.relpath(ancillary_file, common_root)
-            destination_path = os.path.join(package_dir, relative_path)
-            os.makedirs(os.path.dirname(destination_path), exist_ok=True)
+            destination_path = os.path.join(project_dir, os.path.basename(ancillary_file))
             shutil.copy2(ancillary_file, destination_path)
-
-        # setup.py content
-        setup_content = self.dedent_multiline(
-            """
-            import os
-            from setuptools import setup
-
-            with open(os.path.join("docs", "README.md"), encoding="utf-8") as fh:
-                long_desc = fh.read()
-
-            setup(
-                name="{dist_name}",
-                version="{version}",
-                author="{author}",
-                author_email="{email}",
-                description="{description}",
-                long_description=long_desc,
-                long_description_content_type="text/markdown",
-                url="https://pypi.org/project/{dist_name}/",
-                packages=["{package_name}"],
-                include_package_data=True,
-                package_data={{"{package_name}": ["*", "**/*"]}},
-                install_requires={dependencies},
-                classifiers=[
-                    "Programming Language :: Python :: 3",
-                    "License :: OSI Approved :: MIT License",
-                    "Operating System :: OS Independent",
-                ],
-                python_requires=">=3.6",
-                zip_safe=False,
-            )
-            """
-        ).format(
-            dist_name=self.name,
-            version=self.version,
-            author=self.author,
-            email=self.email,
-            description=self.description,
-            dependencies=self.dependencies,
-            package_name=package_name,
-        )
-        with open(os.path.join(project_dir, "setup.py"), "w", encoding="utf-8") as f:
-            f.write(setup_content)
-
-        # MANIFEST.in
-        manifest_lines = [
-            f"recursive-include {package_name} *",
-            "include docs/README.md",
-            "include LICENSE",
-        ]
-        with open(os.path.join(project_dir, "MANIFEST.in"), "w", encoding="utf-8") as f:
-            f.write("\n".join(manifest_lines))
-
-        # Root LICENSE
-        root_license_path = os.path.join(project_dir, "LICENSE")
-        try:
-            with open(root_license_path, "w", encoding="utf-8") as f:
-                f.write(self.dedent_multiline(self.license_text) or license_text)
-        except Exception:
-            pass
-
-        # requirements.txt (for reference)
-        with open(os.path.join(dist_dir, "requirements.txt"), "w", encoding="utf-8") as f:
-            f.write("\n".join(self.dependencies))
-
-        # .pypirc
-        self.generate_pypirc(dist_dir)
 
     def generate_pypirc(self, dist_dir: str) -> None:
         print("Generating .pypirc file...")
