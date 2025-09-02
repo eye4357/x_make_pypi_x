@@ -27,3 +27,7 @@ warn_redundant_casts = true
 no_implicit_optional = true
 strict_optional = true
 exclude = "(^.venv/|^.mypy_cache/|^build/|^dist/)"
+
+[project]
+name = "x_make_pypi_x"
+version = "4.0.1"
