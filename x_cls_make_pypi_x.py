@@ -117,20 +117,34 @@ class x_cls_make_pypi_x:
         project_dir = os.path.dirname(main_python_file)
         self.update_pyproject_toml(project_dir)
         os.chdir(project_dir)
+        # Clean dist/ before build
+        dist_dir = os.path.join(project_dir, "dist")
+        if os.path.exists(dist_dir):
+            print("Cleaning dist/ directory before build...")
+            for f in os.listdir(dist_dir):
+                try:
+                    os.remove(os.path.join(dist_dir, f))
+                except Exception as e:
+                    print(f"Could not remove {f}: {e}")
         build_cmd = f"{sys.executable} -m build"
         print(f"Running build: {build_cmd}")
         build_result = os.system(build_cmd)
         if build_result != 0:
             print("Build failed.")
             raise RuntimeError("Build failed. Aborting publish.")
-        dist_dir = os.path.join(project_dir, "dist")
         if not os.path.exists(dist_dir):
             print("dist/ directory not found after build.")
             raise RuntimeError("dist/ directory not found. Aborting publish.")
-        files = [os.path.join(dist_dir, f) for f in os.listdir(dist_dir) if f.endswith((".tar.gz", ".whl"))]
+        # Only upload files matching package name and version
+        valid_prefixes = [f"{self.name}-{self.version}"]
+        files = [
+            os.path.join(dist_dir, f)
+            for f in os.listdir(dist_dir)
+            if any(f.startswith(prefix) for prefix in valid_prefixes) and f.endswith((".tar.gz", ".whl"))
+        ]
         if not files:
-            print("No distribution files found for upload.")
-            raise RuntimeError("No distribution files found. Aborting publish.")
+            print("No valid distribution files found for upload.")
+            raise RuntimeError("No valid distribution files found. Aborting publish.")
         files_str = ' '.join([f'"{f}"' for f in files])
         # Check for .pypirc or TWINE_USERNAME/TWINE_PASSWORD/TWINE_API_TOKEN
         pypirc_path = os.path.expanduser("~/.pypirc")
