@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import configparser
 import os
 import shutil
-import subprocess
 import textwrap
+import sys
 
 
 class x_cls_make_pypi_x:
@@ -113,7 +112,7 @@ class x_cls_make_pypi_x:
         if not os.path.exists(dist_dir):
             print("dist/ directory not found after build.")
             return
-        files = [os.path.join(dist_dir, f) for f in os.listdir(dist_dir) if f.endswith(('.tar.gz', '.whl'))]
+        files = [os.path.join(dist_dir, f) for f in os.listdir(dist_dir) if f.endswith((".tar.gz", ".whl"))]
         if not files:
             print("No distribution files found for upload.")
             return
