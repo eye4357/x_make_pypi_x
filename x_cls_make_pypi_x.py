@@ -84,8 +84,12 @@ class x_cls_make_pypi_x:
         package_name = self.name
         parent_dir = os.path.dirname(os.path.abspath(main_file))
         package_dir = os.path.join(parent_dir, package_name)
+        # Always remove the target package folder before copying to avoid WinError 183
         if os.path.exists(package_dir):
-            shutil.rmtree(package_dir)
+            try:
+                shutil.rmtree(package_dir)
+            except Exception as e:
+                print(f"Warning: Could not remove {package_dir}: {e}")
         os.makedirs(package_dir, exist_ok=True)
         # Copy main file as <package>/<main_file>
         shutil.copy2(main_file, os.path.join(package_dir, os.path.basename(main_file)))
