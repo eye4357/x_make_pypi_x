@@ -109,23 +109,44 @@ class x_cls_make_pypi_x:
         build_result = os.system(build_cmd)
         if build_result != 0:
             print("Build failed.")
-            return
+            raise RuntimeError("Build failed. Aborting publish.")
         dist_dir = os.path.join(project_dir, "dist")
         if not os.path.exists(dist_dir):
             print("dist/ directory not found after build.")
-            return
+            raise RuntimeError("dist/ directory not found. Aborting publish.")
         files = [os.path.join(dist_dir, f) for f in os.listdir(dist_dir) if f.endswith((".tar.gz", ".whl"))]
         if not files:
             print("No distribution files found for upload.")
-            return
+            raise RuntimeError("No distribution files found. Aborting publish.")
         files_str = ' '.join([f'"{f}"' for f in files])
+        # Check for .pypirc or TWINE_USERNAME/TWINE_PASSWORD/TWINE_API_TOKEN
+        pypirc_path = os.path.expanduser("~/.pypirc")
+        has_pypirc = os.path.exists(pypirc_path)
+        has_env_creds = any([
+            os.environ.get("TWINE_USERNAME"),
+            os.environ.get("TWINE_PASSWORD"),
+            os.environ.get("TWINE_API_TOKEN"),
+        ])
+        if not has_pypirc and not has_env_creds:
+            print("WARNING: No PyPI credentials found (.pypirc or TWINE env vars). Upload will likely fail.")
         twine_cmd = f"{sys.executable} -m twine upload {files_str} --verbose"
         print(f"Running upload: {twine_cmd}")
-        upload_result = os.system(twine_cmd)
-        if upload_result != 0:
-            print("Upload to PyPI failed.")
-        else:
-            print("Upload to PyPI succeeded.")
+        # Use subprocess to capture output
+        import subprocess
+        try:
+            result = subprocess.run(twine_cmd, shell=True, capture_output=True, text=True)
+            print("Twine stdout:")
+            print(result.stdout)
+            print("Twine stderr:")
+            print(result.stderr)
+            if result.returncode != 0:
+                print(f"Upload to PyPI failed with exit code {result.returncode}.")
+                raise RuntimeError(f"Twine upload failed. See output above.")
+            else:
+                print("Upload to PyPI succeeded.")
+        except Exception as e:
+            print(f"Exception during Twine upload: {e}")
+            raise
 
     def prepare_and_publish(self, main_python_file: str, ancillary_files: list[str]) -> None:
         if self.cleanup_evidence:
