@@ -93,9 +93,38 @@ class x_cls_make_pypi_x:
         print("All ancillary files are present.")
 
     def publish(self, main_python_file: str, ancillary_files: list[str]) -> None:
-        """Publish step: Only copies files, no build or upload."""
+        """Publish step: Copies files, builds, and uploads to PyPI."""
         self.create_files(main_python_file, ancillary_files)
-        print("Main and ancillary files copied. No packaging or publishing performed.")
+        print("Main and ancillary files copied. Starting build and upload...")
+
+        project_dir = os.path.dirname(main_python_file)
+        os.chdir(project_dir)
+
+        # Build the package
+        build_cmd = f"{sys.executable} -m build"
+        print(f"Running build: {build_cmd}")
+        build_result = os.system(build_cmd)
+        if build_result != 0:
+            print("Build failed.")
+            return
+
+        # Upload to PyPI using twine
+        dist_dir = os.path.join(project_dir, "dist")
+        if not os.path.exists(dist_dir):
+            print("dist/ directory not found after build.")
+            return
+        files = [os.path.join(dist_dir, f) for f in os.listdir(dist_dir) if f.endswith(('.tar.gz', '.whl'))]
+        if not files:
+            print("No distribution files found for upload.")
+            return
+        files_str = ' '.join([f'"{f}"' for f in files])
+        twine_cmd = f"{sys.executable} -m twine upload {files_str} --verbose"
+        print(f"Running upload: {twine_cmd}")
+        upload_result = os.system(twine_cmd)
+        if upload_result != 0:
+            print("Upload to PyPI failed.")
+        else:
+            print("Upload to PyPI succeeded.")
 
     def prepare_and_publish(self, main_python_file: str, ancillary_files: list[str]) -> None:
         """Run the steps to prepare and publish the package: only copies files."""
