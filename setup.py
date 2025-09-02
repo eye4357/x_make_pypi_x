@@ -6,7 +6,7 @@ with open(os.path.join("docs", "README.md"), encoding="utf-8") as fh:
 
 setup(
     name="x_make_pypi_x",
-    version="3.0.15",
+    version="3.0.16",
     author="Roy GM",
     author_email="eye4357@outlook.com",
     description="Makes PyPI packages.",
