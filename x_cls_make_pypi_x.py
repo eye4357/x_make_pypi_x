@@ -44,7 +44,7 @@ class x_cls_make_pypi_x:
         return textwrap.dedent(multiline_string).lstrip("\n").rstrip() + "\n"
 
     def create_files(self, python_file: str, ancillary_files: list[str]) -> None:
-        """Copy main code and ancillary files only."""
+        """Copy main code and ancillary files only. If ancillary is a folder, copy recursively."""
         project_dir = os.path.dirname(python_file)
         os.chdir(project_dir)
 
@@ -54,11 +54,23 @@ class x_cls_make_pypi_x:
         if os.path.abspath(python_file) != os.path.abspath(destination_script_path):
             shutil.copy2(python_file, destination_script_path)
 
-        # Copy ancillary files
-        for ancillary_file in ancillary_files:
-            destination_path = os.path.join(project_dir, os.path.basename(ancillary_file))
-            if os.path.abspath(ancillary_file) != os.path.abspath(destination_path):
-                shutil.copy2(ancillary_file, destination_path)
+        # Copy ancillary files and folders
+        for ancillary_path in ancillary_files:
+            if os.path.isdir(ancillary_path):
+                # Recursively copy folder contents, preserving structure
+                for root, dirs, files in os.walk(ancillary_path):
+                    rel_root = os.path.relpath(root, os.path.dirname(ancillary_path))
+                    dest_root = os.path.join(project_dir, os.path.basename(ancillary_path), rel_root)
+                    os.makedirs(dest_root, exist_ok=True)
+                    for file in files:
+                        src_file = os.path.join(root, file)
+                        dest_file = os.path.join(dest_root, file)
+                        if os.path.abspath(src_file) != os.path.abspath(dest_file):
+                            shutil.copy2(src_file, dest_file)
+            elif os.path.isfile(ancillary_path):
+                destination_path = os.path.join(project_dir, os.path.basename(ancillary_path))
+                if os.path.abspath(ancillary_path) != os.path.abspath(destination_path):
+                    shutil.copy2(ancillary_path, destination_path)
 
     # .pypirc generation removed; publishing is now manual/CI only.
 
