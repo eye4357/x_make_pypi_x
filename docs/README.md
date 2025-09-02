@@ -1,4 +1,4 @@
-# x_make_pypi_x
+# x_make_github_clones_x
 
-Makes PyPI packages.
+Makes GitHub repository clones.
 
