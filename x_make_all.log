@@ -1,0 +1,32 @@
+2025-09-02 21:59:52,774 INFO Starting x_0_make_all_x orchestration
+2025-09-02 22:00:09,385 INFO Repository cloning/updating complete
+2025-09-02 22:00:09,385 INFO Starting the PyPI package publishing process...
+2025-09-02 22:00:09,386 INFO Publishing x_make_markdown_x version 6.0.10
+2025-09-02 22:00:10,076 ERROR Failed to publish x_make_markdown_x: Build failed. Aborting publish.
+Traceback (most recent call last):
+  File "c:\x_cloned_repos_x\x_0_make_all_x\x_cls_make_all_x.py", line 116, in publish_one
+    x_cls_make_pypi_x(name=name, version=version, **kwargs).prepare_and_publish(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        main_file, ancillary_files
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\x_cloned_repos_x\x_make_pypi_x\x_cls_make_pypi_x.py", line 379, in prepare_and_publish
+    except Exception as e:
+  File "C:\x_cloned_repos_x\x_make_pypi_x\x_cls_make_pypi_x.py", line 341, in publish
+    self._essential("dist/ directory not found after build.")
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Build failed. Aborting publish.
+2025-09-02 22:00:35,176 INFO Starting x_0_make_all_x orchestration
+2025-09-02 22:00:51,147 INFO Repository cloning/updating complete
+2025-09-02 22:00:51,147 INFO Starting the PyPI package publishing process...
+2025-09-02 22:00:51,147 INFO Publishing x_make_markdown_x version 6.0.10
+2025-09-02 22:00:51,316 INFO Published x_make_markdown_x==6.0.10
+2025-09-02 22:00:51,317 INFO Publishing x_make_persistent_env_var_x version 6.0.10
+2025-09-02 22:00:51,505 INFO Published x_make_persistent_env_var_x==6.0.10
+2025-09-02 22:00:51,506 INFO Publishing x_make_pypi_x version 6.0.10
+2025-09-02 22:00:51,659 INFO Published x_make_pypi_x==6.0.10
+2025-09-02 22:00:51,660 INFO Publishing x_make_github_clones_x version 6.0.10
+2025-09-02 22:00:51,838 INFO Published x_make_github_clones_x==6.0.10
+2025-09-02 22:00:51,839 INFO Publishing x_make_pip_updates_x version 6.0.10
+2025-09-02 22:00:52,018 INFO Published x_make_pip_updates_x==6.0.10
