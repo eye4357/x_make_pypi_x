@@ -19,11 +19,25 @@ class x_cls_make_pypi_x:
                 data = json.load(response)
             return self.version in data.get("releases", {})
         except Exception as e:
-            print(f"WARNING: Could not check PyPI for {self.name}=={self.version}: {e}")
+            # Always show this as an essential warning
+            try:
+                self._essential(f"WARNING: Could not check PyPI for {self.name}=={self.version}: {e}")
+            except Exception:
+                # If called before initialization of helpers, fall back to print
+                print(f"WARNING: Could not check PyPI for {self.name}=={self.version}: {e}")
             return False
     """
     Minimal PyPI publisher: Only copies the main file, ancillary files, and preserves CI files. No legacy packaging files are created or required.
     """
+
+    def _essential(self, *args, **kwargs):
+        """Always-printed messages (errors, warnings, high-level status)."""
+        print(*args, **kwargs)
+
+    def _debug(self, *args, **kwargs):
+        """Verbose diagnostic output printed only when self.debug is True."""
+        if getattr(self, "debug", False):
+            print(*args, **kwargs)
     def __init__(
         self,
         name: str,
@@ -35,6 +49,7 @@ class x_cls_make_pypi_x:
         dependencies: list[str],
         cleanup_evidence: bool = True,
         dry_run: bool = False,
+        debug: bool = False,
     ) -> None:
         self.name = name
         self.version = version
@@ -45,12 +60,14 @@ class x_cls_make_pypi_x:
         self.dependencies = dependencies
         self.cleanup_evidence = cleanup_evidence
         self.dry_run = dry_run
+        # Controls verbose diagnostic printing across the class
+        self.debug = debug
 
     def update_pyproject_toml(self, project_dir: str) -> None:
         """Update pyproject.toml with the correct name and version before building. Print and validate after update."""
         pyproject_path = os.path.join(project_dir, "pyproject.toml")
         if not os.path.exists(pyproject_path):
-            print(f"No pyproject.toml found in {project_dir}, skipping update.")
+            self._essential(f"No pyproject.toml found in {project_dir}, skipping update.")
             return
         with open(pyproject_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
@@ -78,12 +95,12 @@ class x_cls_make_pypi_x:
             new_lines.append(f'version = "{self.version}"\n')
         with open(pyproject_path, "w", encoding="utf-8") as f:
             f.writelines(new_lines)
-        print(f"Updated pyproject.toml with name={self.name}, version={self.version}")
+        self._essential(f"Updated pyproject.toml with name={self.name}, version={self.version}")
         # Print and validate pyproject.toml
         with open(pyproject_path, "r", encoding="utf-8") as f:
             contents = f.read()
-        print("pyproject.toml after update:")
-        print(contents)
+        self._debug("pyproject.toml after update:")
+        self._debug(contents)
         # Validate [project] section
         import re
         name_match = re.search(r'^name\s*=\s*"(.+)"', contents, re.MULTILINE)
@@ -109,19 +126,19 @@ class x_cls_make_pypi_x:
         package_dir = os.path.join(build_dir, package_name)
 
         def print_stat_info(path: str):
-            print(f"STAT: {path}")
-            print(f"  Exists: {os.path.lexists(path)}")
-            print(f"  Symlink: {os.path.islink(path)}")
-            print(f"  File: {os.path.isfile(path)}")
-            print(f"  Dir: {os.path.isdir(path)}")
+            self._debug(f"STAT: {path}")
+            self._debug(f"  Exists: {os.path.lexists(path)}")
+            self._debug(f"  Symlink: {os.path.islink(path)}")
+            self._debug(f"  File: {os.path.isfile(path)}")
+            self._debug(f"  Dir: {os.path.isdir(path)}")
             try:
-                print(f"  Stat: {os.stat(path)}")
+                self._debug(f"  Stat: {os.stat(path)}")
             except Exception as e:
-                print(f"  Stat failed: {e}")
+                self._debug(f"  Stat failed: {e}")
 
         def force_remove_any(path: str) -> None:
             """Remove any file, symlink, or folder at path, with verbose stat diagnostics."""
-            print(f"Attempting to remove: {path}")
+            self._debug(f"Attempting to remove: {path}")
             print_stat_info(path)
             try:
                 if os.path.islink(path):
@@ -131,9 +148,9 @@ class x_cls_make_pypi_x:
                 elif os.path.isdir(path):
                     shutil.rmtree(path, onexc=lambda func, p, exc_info: os.chmod(p, stat.S_IWRITE) or func(p))
             except Exception as e:
-                print(f"ERROR: Could not forcibly remove {path}: {e}")
+                self._essential(f"ERROR: Could not forcibly remove {path}: {e}")
                 traceback.print_exc()
-            print(f"After removal attempt:")
+            self._debug(f"After removal attempt:")
             print_stat_info(path)
 
         # Remove and verify both build_dir and package_dir
@@ -141,7 +158,7 @@ class x_cls_make_pypi_x:
             if os.path.lexists(path):
                 force_remove_any(path)
                 if os.path.lexists(path):
-                    print(f"FATAL: {path} still exists after attempted removal. Aborting.")
+                    self._essential(f"FATAL: {path} still exists after attempted removal. Aborting.")
                     raise RuntimeError(f"Could not remove: {path}")
 
         # Recreate build dir
@@ -149,50 +166,50 @@ class x_cls_make_pypi_x:
 
         # Remove any file, folder, or symlink named package_dir before creation
         if os.path.lexists(package_dir):
-            print(f"DIAGNOSTIC: {package_dir} exists before creation.")
+            self._debug(f"DIAGNOSTIC: {package_dir} exists before creation.")
             print_stat_info(package_dir)
             force_remove_any(package_dir)
             time.sleep(1)
             if os.path.lexists(package_dir):
-                print(f"WARNING: {package_dir} still exists after first forced removal and delay.")
+                self._essential(f"WARNING: {package_dir} still exists after first forced removal and delay.")
                 print_stat_info(package_dir)
-                print(f"Attempting final forced removal and longer delay...")
+                self._debug(f"Attempting final forced removal and longer delay...")
                 force_remove_any(package_dir)
                 time.sleep(2)
                 if os.path.lexists(package_dir):
-                    print(f"FATAL: {package_dir} still exists after final forced removal and delay.")
+                    self._essential(f"FATAL: {package_dir} still exists after final forced removal and delay.")
                     print_stat_info(package_dir)
-                    print(f"Contents of parent build directory:")
+                    self._essential(f"Contents of parent build directory:")
                     for item in os.listdir(build_dir):
-                        print(f" - {item}")
+                        self._essential(f" - {item}")
                     raise RuntimeError(f"Could not remove package_dir: {package_dir}")
 
         # Create the package dir only if it does not exist
-        print(f"DIAGNOSTIC: About to create {package_dir} if needed.")
+        self._debug(f"DIAGNOSTIC: About to create {package_dir} if needed.")
         print_stat_info(package_dir)
         if not os.path.exists(package_dir):
             try:
                 os.makedirs(package_dir, exist_ok=True)
             except OSError as e:
-                print(f"FATAL: Could not create {package_dir}: {e}")
+                self._essential(f"FATAL: Could not create {package_dir}: {e}")
                 print_stat_info(package_dir)
                 if os.path.lexists(package_dir):
-                    print(f"Contents of parent build directory:")
+                    self._essential(f"Contents of parent build directory:")
                     for item in os.listdir(build_dir):
-                        print(f" - {item}")
+                        self._essential(f" - {item}")
                 raise
         else:
-            print(f"INFO: {package_dir} already exists as a directory, proceeding.")
+            self._essential(f"INFO: {package_dir} already exists as a directory, proceeding.")
 
         # After ancillary file copying, ensure only a directory exists at package_dir
-        print(f"DIAGNOSTIC: After ancillary file copy, checking {package_dir}.")
+        self._debug(f"DIAGNOSTIC: After ancillary file copy, checking {package_dir}.")
         print_stat_info(package_dir)
         if os.path.lexists(package_dir) and not os.path.isdir(package_dir):
-            print(f"WARNING: {package_dir} is not a directory after ancillary file copy. Forcing removal.")
+            self._essential(f"WARNING: {package_dir} is not a directory after ancillary file copy. Forcing removal.")
             force_remove_any(package_dir)
             time.sleep(1)
             if os.path.lexists(package_dir):
-                print(f"FATAL: {package_dir} still exists after forced removal post ancillary copy.")
+                self._essential(f"FATAL: {package_dir} still exists after forced removal post ancillary copy.")
                 print_stat_info(package_dir)
                 raise RuntimeError(f"Could not ensure package_dir is a directory: {package_dir}")
 
@@ -209,7 +226,7 @@ class x_cls_make_pypi_x:
                 dest = os.path.join(package_dir, os.path.basename(ancillary_path))
                 # Remove destination if it exists to avoid copytree error
                 if os.path.lexists(dest):
-                    print(f"DIAGNOSTIC: Ancillary destination {dest} exists before copy. Removing...")
+                    self._debug(f"DIAGNOSTIC: Ancillary destination {dest} exists before copy. Removing...")
                     print_stat_info(dest)
                     force_remove_any(dest)
                     time.sleep(0.5)
@@ -245,40 +262,40 @@ class x_cls_make_pypi_x:
     def prepare(self, main_file: str, ancillary_files: list[str]) -> None:
         if not os.path.exists(main_file):
             raise FileNotFoundError(f"Main file '{main_file}' does not exist.")
-        print(f"Main file found: {main_file}")
+        self._essential(f"Main file found: {main_file}")
         for ancillary_file in ancillary_files:
             if not os.path.exists(ancillary_file):
-                print(f"Expected ancillary file not found: {ancillary_file}")
+                self._essential(f"Expected ancillary file not found: {ancillary_file}")
                 raise FileNotFoundError(f"Ancillary file '{ancillary_file}' is not found.")
-        print("All ancillary files are present.")
+        self._essential("All ancillary files are present.")
 
     def publish(self, main_file: str, ancillary_files: list[str]) -> None:
         # Check if version already exists on PyPI
         if self.version_exists_on_pypi():
-            print(f"SKIP: {self.name} version {self.version} already exists on PyPI. Skipping publish.")
+            self._essential(f"SKIP: {self.name} version {self.version} already exists on PyPI. Skipping publish.")
             return
         self.create_files(main_file, ancillary_files)
-        print("Main and ancillary files copied. Updating pyproject.toml...")
+        self._essential("Main and ancillary files copied. Updating pyproject.toml...")
         project_dir = self._project_dir
         self.update_pyproject_toml(project_dir)
         os.chdir(project_dir)
         # Clean dist/ before build
         dist_dir = os.path.join(project_dir, "dist")
         if os.path.exists(dist_dir):
-            print("Cleaning dist/ directory before build...")
+            self._essential("Cleaning dist/ directory before build...")
             for f in os.listdir(dist_dir):
                 try:
                     os.remove(os.path.join(dist_dir, f))
                 except Exception as e:
-                    print(f"Could not remove {f}: {e}")
+                    self._essential(f"Could not remove {f}: {e}")
         build_cmd = f"{sys.executable} -m build"
-        print(f"Running build: {build_cmd}")
+        self._essential(f"Running build: {build_cmd}")
         build_result = os.system(build_cmd)
         if build_result != 0:
-            print("Build failed.")
+            self._essential("Build failed.")
             raise RuntimeError("Build failed. Aborting publish.")
         if not os.path.exists(dist_dir):
-            print("dist/ directory not found after build.")
+            self._essential("dist/ directory not found after build.")
             raise RuntimeError("dist/ directory not found. Aborting publish.")
         # Only upload files matching package name and version
         valid_prefixes = [f"{self.name}-{self.version}"]
@@ -288,7 +305,7 @@ class x_cls_make_pypi_x:
             if any(f.startswith(prefix) for prefix in valid_prefixes) and f.endswith((".tar.gz", ".whl"))
         ]
         if not files:
-            print("No valid distribution files found for upload.")
+            self._essential("No valid distribution files found for upload.")
             raise RuntimeError("No valid distribution files found. Aborting publish.")
         files_str = ' '.join([f'"{f}"' for f in files])
         # Check for .pypirc or TWINE_USERNAME/TWINE_PASSWORD/TWINE_API_TOKEN
@@ -300,24 +317,25 @@ class x_cls_make_pypi_x:
             os.environ.get("TWINE_API_TOKEN"),
         ])
         if not has_pypirc and not has_env_creds:
-            print("WARNING: No PyPI credentials found (.pypirc or TWINE env vars). Upload will likely fail.")
+            self._essential("WARNING: No PyPI credentials found (.pypirc or TWINE env vars). Upload will likely fail.")
         twine_cmd = f"{sys.executable} -m twine upload {files_str} --verbose"
-        print(f"Running upload: {twine_cmd}")
+        self._essential(f"Running upload: {twine_cmd}")
         # Use subprocess to capture output
         import subprocess
         try:
             result = subprocess.run(twine_cmd, shell=True, capture_output=True, text=True)
-            print("Twine stdout:")
-            print(result.stdout)
-            print("Twine stderr:")
-            print(result.stderr)
+            # Detailed twine output is debug-level
+            self._debug("Twine stdout:")
+            self._debug(result.stdout)
+            self._debug("Twine stderr:")
+            self._debug(result.stderr)
             if result.returncode != 0:
-                print(f"Upload to PyPI failed with exit code {result.returncode}.")
+                self._essential(f"Upload to PyPI failed with exit code {result.returncode}.")
                 raise RuntimeError(f"Twine upload failed. See output above.")
             else:
-                print("Upload to PyPI succeeded.")
+                self._essential("Upload to PyPI succeeded.")
         except Exception as e:
-            print(f"Exception during Twine upload: {e}")
+            self._essential(f"Exception during Twine upload: {e}")
             raise
 
     def prepare_and_publish(self, main_file: str, ancillary_files: list[str]) -> None:
