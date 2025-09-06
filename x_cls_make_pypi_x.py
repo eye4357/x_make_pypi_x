@@ -36,7 +36,9 @@ class x_cls_make_pypi_x:
             except Exception:
                 pass
 
-    def prepare_and_publish(self, main_file: str, ancillary_files: Iterable[str]) -> None:
+    def prepare_and_publish(
+        self, main_file: str, ancillary_files: Iterable[str]
+    ) -> None:
         """Create a minimal build dir, try to build and upload, but don't fail hard.
 
         This stub does not write .pre-commit-config.yaml or install hooks.
@@ -45,25 +47,36 @@ class x_cls_make_pypi_x:
             raise FileNotFoundError(main_file)
 
         build_dir = os.path.abspath(
-            os.path.join(tempfile.gettempdir(), f"_build_{self.name}_{uuid.uuid4().hex}")
+            os.path.join(
+                tempfile.gettempdir(), f"_build_{self.name}_{uuid.uuid4().hex}"
+            )
         )
         os.makedirs(build_dir, exist_ok=True)
 
         try:
-            shutil.copy2(main_file, os.path.join(build_dir, os.path.basename(main_file)))
+            shutil.copy2(
+                main_file, os.path.join(build_dir, os.path.basename(main_file))
+            )
         except Exception:
             # best-effort copy
             pass
 
         try:
-            subprocess.run([sys.executable, "-m", "build", "--sdist", "--wheel"], check=True)
+            subprocess.run(
+                [sys.executable, "-m", "build", "--sdist", "--wheel"],
+                check=True,
+            )
         except Exception:
             self._log("Build step skipped or failed; continuing.")
 
         try:
-            subprocess.run([sys.executable, "-m", "twine", "upload", "dist/*"], check=True)
+            subprocess.run(
+                [sys.executable, "-m", "twine", "upload", "dist/*"], check=True
+            )
         except Exception:
-            self._log("Twine upload skipped or failed (non-fatal for this stub).")
+            self._log(
+                "Twine upload skipped or failed (non-fatal for this stub)."
+            )
 
     def publish(self, main_file: str, ancillary_files: Iterable[str]) -> None:
         return self.prepare_and_publish(main_file, ancillary_files)
