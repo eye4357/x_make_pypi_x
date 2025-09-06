@@ -1,27 +1,22 @@
-"""Minimal PyPI publisher stub (pre-commit config references removed).
+"""Minimal PyPI publisher stub.
 
-This lightweight stub provides the small surface area used by other
-orchestrator scripts. It intentionally avoids writing or installing
-".pre-commit-config.yaml" and is tolerant of build/upload failures.
+Reduced to a deterministic, no-op publisher that preserves the public
+API used by orchestrators. It performs a basic existence check for the
+main file and optionally logs when invoked in debug mode.
 """
 
 from __future__ import annotations
 
 import os
-import shutil
-import subprocess
-import sys
-import tempfile
-import uuid
 from typing import Any, Iterable
 
 
 class x_cls_make_pypi_x:
-    """Very small publisher stub used during refactor.
+    """Very small publisher stub.
 
-    Methods are intentionally best-effort and non-fatal so importing
-    this module does not break other scripts while pre-commit behavior
-    is being removed.
+    The class intentionally does nothing that has side effects (no builds,
+    no uploads, no temp dirs). It keeps the same method signatures so
+    callers remain compatible.
     """
 
     def __init__(self, name: str, version: str, **kwargs: Any) -> None:
@@ -39,43 +34,16 @@ class x_cls_make_pypi_x:
     def prepare_and_publish(
         self, main_file: str, ancillary_files: Iterable[str]
     ) -> None:
-        """Create a minimal build dir, try to build and upload, but don't fail hard.
+        """Minimal, deterministic publisher: check main_file then return.
 
-        This stub does not write .pre-commit-config.yaml or install hooks.
+        This function intentionally performs no builds or network uploads.
         """
         if not os.path.exists(main_file):
             raise FileNotFoundError(main_file)
 
-        build_dir = os.path.abspath(
-            os.path.join(
-                tempfile.gettempdir(), f"_build_{self.name}_{uuid.uuid4().hex}"
-            )
-        )
-        os.makedirs(build_dir, exist_ok=True)
-
-        try:
-            shutil.copy2(
-                main_file, os.path.join(build_dir, os.path.basename(main_file))
-            )
-        except Exception:
-            # best-effort copy
-            pass
-
-        try:
-            subprocess.run(
-                [sys.executable, "-m", "build", "--sdist", "--wheel"],
-                check=True,
-            )
-        except Exception:
-            self._log("Build step skipped or failed; continuing.")
-
-        try:
-            subprocess.run(
-                [sys.executable, "-m", "twine", "upload", "dist/*"], check=True
-            )
-        except Exception:
+        if self.debug:
             self._log(
-                "Twine upload skipped or failed (non-fatal for this stub)."
+                f"publish skipped for {self.name} {self.version} (minimal stub)"
             )
 
     def publish(self, main_file: str, ancillary_files: Iterable[str]) -> None:
