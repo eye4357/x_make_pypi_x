@@ -7,14 +7,34 @@ import uuid
 import json
 from typing import Any
 
+
+# Minimal BaseMake fallback so this module works even if
+# x_make_common_x is not present in the environment. This mirrors the
+# small surface area used by the publisher (get_env/get_env_bool/run_cmd).
+class BaseMake:
+    def get_env(self, name: str, default: str | None = None) -> str | None:
+        return os.environ.get(name, default)
+
+    def get_env_bool(self, name: str, default: bool = False) -> bool:
+        v = os.environ.get(name)
+        if v is None:
+            return default
+        return v.lower() in ("1", "true", "yes")
+
+
 """Twine-backed PyPI publisher implementation (installed shim)."""
 
 
-class x_cls_make_pypi_x:
+class x_cls_make_pypi_x(BaseMake):
+    # Configurable endpoints and env names
+    PYPI_INDEX_URL: str = "https://pypi.org"
+    TEST_PYPI_URL: str = "https://test.pypi.org"
+    TEST_PYPI_TOKEN_ENV: str = "TEST_PYPI_TOKEN"
+
     def version_exists_on_pypi(self) -> bool:
         """Check if the current package name and version already exist on PyPI."""
         try:
-            url = f"https://pypi.org/pypi/{self.name}/json"
+            url = f"{self.PYPI_INDEX_URL}/pypi/{self.name}/json"
             with urllib.request.urlopen(url, timeout=10) as response:
                 data = json.load(response)
             return self.version in data.get("releases", {})
@@ -205,9 +225,9 @@ class x_cls_make_pypi_x:
         has_pypirc = os.path.exists(pypirc_path)
         has_env_creds = any(
             [
-                os.environ.get("TWINE_USERNAME"),
-                os.environ.get("TWINE_PASSWORD"),
-                os.environ.get("TWINE_API_TOKEN"),
+                self.get_env("TWINE_USERNAME"),
+                self.get_env("TWINE_PASSWORD"),
+                self.get_env("TWINE_API_TOKEN"),
             ]
         )
         if not has_pypirc and not has_env_creds:
