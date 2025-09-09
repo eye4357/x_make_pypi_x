@@ -54,7 +54,6 @@ class x_cls_make_pypi_x(BaseMake):
         description: str,
         license_text: str,
         dependencies: list[str],
-        cleanup_evidence: bool = True,
         ctx: object | None = None,
         **kwargs: Any,
     ) -> None:
@@ -69,7 +68,6 @@ class x_cls_make_pypi_x(BaseMake):
         self.description = description
         self.license_text = license_text
         self.dependencies = dependencies
-        self.cleanup_evidence = cleanup_evidence
 
         # Prefer ctx-provided dry_run when available (tests expect this)
         try:
@@ -274,8 +272,8 @@ class x_cls_make_pypi_x(BaseMake):
     def prepare_and_publish(
         self, main_file: str, ancillary_files: list[str]
     ) -> None:
-        if self.cleanup_evidence:
-            self.prepare(main_file, ancillary_files or [])
+        # Always validate inputs (evidence cleanup is enforced unconditionally).
+        self.prepare(main_file, ancillary_files or [])
         self.publish(main_file, ancillary_files or [])
 
 
