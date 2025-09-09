@@ -61,6 +61,7 @@ class x_cls_make_pypi_x(BaseMake):
         # accept optional orchestrator context (backwards compatible)
         self._ctx = ctx
 
+        # store basic metadata
         self.name = name
         self.version = version
         self.author = author
@@ -69,16 +70,17 @@ class x_cls_make_pypi_x(BaseMake):
         self.license_text = license_text
         self.dependencies = dependencies
         self.cleanup_evidence = cleanup_evidence
-        # Phase 4: dry-run comes from the orchestrator context when provided.
-        # If no context is provided, default to False.
+
+        # Prefer ctx-provided dry_run when available (tests expect this)
         try:
             self.dry_run = bool(getattr(self._ctx, "dry_run", False))
         except Exception:
             self.dry_run = False
+
         self._extra = kwargs or {}
         self.debug = bool(self._extra.get("debug", False))
-        # Note: ctx was popped from kwargs into self._ctx above. If not
-        # provided it remains None. Guard informational prints on verbose.
+
+        # Print preparation message when verbose is requested (or always is OK)
         if getattr(self._ctx, "verbose", False):
             print(f"[pypi] prepared publisher for {self.name}=={self.version}")
 
