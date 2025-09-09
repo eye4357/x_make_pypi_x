@@ -254,8 +254,25 @@ class x_cls_make_pypi_x(BaseMake):
             )
         import subprocess
 
-        twine_cmd = [sys.executable, "-m", "twine", "upload", *files]
-        print("Running upload:", " ".join(twine_cmd))
+        # Respect an environment toggle to skip uploading files that already
+        # exist on PyPI. Default to True to avoid failing the overall run when
+        # package files are already present (common in retry scenarios).
+        skip_existing = self.get_env_bool("TWINE_SKIP_EXISTING", True)
+        if skip_existing:
+            twine_cmd = [
+                sys.executable,
+                "-m",
+                "twine",
+                "upload",
+                "--skip-existing",
+                *files,
+            ]
+            print(
+                "Running upload (with --skip-existing):", " ".join(twine_cmd)
+            )
+        else:
+            twine_cmd = [sys.executable, "-m", "twine", "upload", *files]
+            print("Running upload:", " ".join(twine_cmd))
 
         result = subprocess.run(
             twine_cmd,
