@@ -55,9 +55,12 @@ class x_cls_make_pypi_x(BaseMake):
         license_text: str,
         dependencies: list[str],
         cleanup_evidence: bool = True,
-        dry_run: bool = False,
+        ctx: object | None = None,
         **kwargs: Any,
     ) -> None:
+        # accept optional orchestrator context (backwards compatible)
+        self._ctx = ctx
+
         self.name = name
         self.version = version
         self.author = author
@@ -66,9 +69,18 @@ class x_cls_make_pypi_x(BaseMake):
         self.license_text = license_text
         self.dependencies = dependencies
         self.cleanup_evidence = cleanup_evidence
-        self.dry_run = dry_run
+        # Phase 4: dry-run comes from the orchestrator context when provided.
+        # If no context is provided, default to False.
+        try:
+            self.dry_run = bool(getattr(self._ctx, "dry_run", False))
+        except Exception:
+            self.dry_run = False
         self._extra = kwargs or {}
         self.debug = bool(self._extra.get("debug", False))
+        # Note: ctx was popped from kwargs into self._ctx above. If not
+        # provided it remains None. Guard informational prints on verbose.
+        if getattr(self._ctx, "verbose", False):
+            print(f"[pypi] prepared publisher for {self.name}=={self.version}")
 
     def update_pyproject_toml(self, project_dir: str) -> None:
         pyproject_path = os.path.join(project_dir, "pyproject.toml")
@@ -77,25 +89,30 @@ class x_cls_make_pypi_x(BaseMake):
                 f"No pyproject.toml found in {project_dir}, skipping update."
             )
             return
-        with open(pyproject_path, "r", encoding="utf-8") as f:
+        with open(pyproject_path, encoding="utf-8") as f:
             lines = f.readlines()
         new_lines = []
         in_project_section = False
         project_section_found = False
-        for line in lines:
-            if line.strip().lower() == "[project]":
+        for src_line in lines:
+            if src_line.strip().lower() == "[project]":
                 in_project_section = True
                 project_section_found = True
-                new_lines.append(line)
+                new_lines.append(src_line)
                 continue
             if in_project_section:
-                if line.strip().startswith("name ="):
-                    line = f'name = "{self.name}"\n'
-                elif line.strip().startswith("version ="):
-                    line = f'version = "{self.version}"\n'
-                elif line.strip() == "" or line.strip().startswith("["):
+                out_line = src_line
+                if src_line.strip().startswith("name ="):
+                    out_line = f'name = "{self.name}"\n'
+                elif src_line.strip().startswith("version ="):
+                    out_line = f'version = "{self.version}"\n'
+                elif src_line.strip() == "" or src_line.strip().startswith(
+                    "["
+                ):
                     in_project_section = False
-            new_lines.append(line)
+                new_lines.append(out_line)
+            else:
+                new_lines.append(src_line)
         if not project_section_found:
             new_lines.append("\n[project]\n")
             new_lines.append(f'name = "{self.name}"\n')
@@ -235,13 +252,14 @@ class x_cls_make_pypi_x(BaseMake):
             print(
                 "WARNING: No PyPI credentials found (.pypirc or TWINE env vars). Upload will likely fail."
             )
-
-        twine_cmd = [sys.executable, "-m", "twine", "upload"] + files
-        print("Running upload:", " ".join(twine_cmd))
         import subprocess
 
+        twine_cmd = [sys.executable, "-m", "twine", "upload", *files]
+        print("Running upload:", " ".join(twine_cmd))
+
         result = subprocess.run(
-            [sys.executable, "-m", "twine", "upload"] + files,
+            twine_cmd,
+            check=False,
             capture_output=True,
             text=True,
         )
