@@ -7,20 +7,7 @@ import sys
 import urllib.request
 import uuid
 from typing import Any
-
-
-# Minimal BaseMake fallback so this module works even if
-# x_make_common_x is not present in the environment. This mirrors the
-# small surface area used by the publisher (get_env/get_env_bool/run_cmd).
-class BaseMake:
-    def get_env(self, name: str, default: str | None = None) -> str | None:
-        return os.environ.get(name, default)
-
-    def get_env_bool(self, name: str, default: bool = False) -> bool:
-        v = os.environ.get(name)
-        if v is None:
-            return default
-        return v.lower() in ("1", "true", "yes")
+from x_make_common_x.x_cls_make_common_x import BaseMake
 
 
 """Twine-backed PyPI publisher implementation (installed shim)."""
@@ -40,7 +27,9 @@ class x_cls_make_pypi_x(BaseMake):
                 data = json.load(response)
             return self.version in data.get("releases", {})
         except Exception as e:
-            print(
+            from x_make_common_x.helpers import info as _info
+
+            _info(
                 f"WARNING: Could not check PyPI for {self.name}=={self.version}: {e}"
             )
             return False
@@ -80,14 +69,16 @@ class x_cls_make_pypi_x(BaseMake):
 
         # Print preparation message when verbose is requested (or always is OK)
         if getattr(self._ctx, "verbose", False):
-            print(f"[pypi] prepared publisher for {self.name}=={self.version}")
+            from x_make_common_x.helpers import info as _info
+
+            _info(f"[pypi] prepared publisher for {self.name}=={self.version}")
 
     def update_pyproject_toml(self, project_dir: str) -> None:
         pyproject_path = os.path.join(project_dir, "pyproject.toml")
         if not os.path.exists(pyproject_path):
-            print(
-                f"No pyproject.toml found in {project_dir}, skipping update."
-            )
+            from x_make_common_x.helpers import info as _info
+
+            _info(f"No pyproject.toml found in {project_dir}, skipping update.")
             return
         with open(pyproject_path, encoding="utf-8") as f:
             lines = f.readlines()
@@ -119,7 +110,9 @@ class x_cls_make_pypi_x(BaseMake):
             new_lines.append(f'version = "{self.version}"\n')
         with open(pyproject_path, "w", encoding="utf-8") as f:
             f.writelines(new_lines)
-        print(
+        from x_make_common_x.helpers import info as _info
+
+        _info(
             f"Updated pyproject.toml with name={self.name}, version={self.version}"
         )
 
@@ -205,7 +198,9 @@ class x_cls_make_pypi_x(BaseMake):
         """
         # If version already exists, skip
         if self.version_exists_on_pypi():
-            print(
+            from x_make_common_x.helpers import info as _info
+
+            _info(
                 f"SKIP: {self.name} version {self.version} already exists on PyPI. Skipping publish."
             )
             return True
@@ -220,7 +215,9 @@ class x_cls_make_pypi_x(BaseMake):
             shutil.rmtree(dist_dir)
 
         build_cmd = [sys.executable, "-m", "build"]
-        print("Running build:", " ".join(build_cmd))
+        from x_make_common_x.helpers import info as _info
+
+        _info("Running build:", " ".join(build_cmd))
         rc = os.system(" ".join(build_cmd))
         if rc != 0:
             raise RuntimeError("Build failed. Aborting publish.")
@@ -249,7 +246,9 @@ class x_cls_make_pypi_x(BaseMake):
             ]
         )
         if not has_pypirc and not has_env_creds:
-            print(
+            from x_make_common_x.helpers import info as _info
+
+            _info(
                 "WARNING: No PyPI credentials found (.pypirc or TWINE env vars). Upload will likely fail."
             )
         import subprocess
@@ -267,12 +266,14 @@ class x_cls_make_pypi_x(BaseMake):
                 "--skip-existing",
                 *files,
             ]
-            print(
-                "Running upload (with --skip-existing):", " ".join(twine_cmd)
-            )
+            from x_make_common_x.helpers import info as _info
+
+            _info("Running upload (with --skip-existing):", " ".join(twine_cmd))
         else:
             twine_cmd = [sys.executable, "-m", "twine", "upload", *files]
-            print("Running upload:", " ".join(twine_cmd))
+            from x_make_common_x.helpers import info as _info
+
+            _info("Running upload:", " ".join(twine_cmd))
 
         result = subprocess.run(
             twine_cmd,
@@ -280,8 +281,12 @@ class x_cls_make_pypi_x(BaseMake):
             capture_output=True,
             text=True,
         )
-        print(result.stdout)
-        print(result.stderr)
+        from x_make_common_x.helpers import info as _info, error as _error
+
+        if result.stdout:
+            _info(result.stdout)
+        if result.stderr:
+            _error(result.stderr)
         if result.returncode != 0:
             raise RuntimeError("Twine upload failed. See output above.")
         return True
