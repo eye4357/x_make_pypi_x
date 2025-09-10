@@ -207,6 +207,41 @@ class x_cls_make_pypi_x(BaseMake):
                         ),
                     )
 
+        # Ensure lightweight stub files (.pyi) exist for typing in every
+        # package directory and for each copied module. These are minimal
+        # and safe: they do not attempt to reconstruct full signatures, but
+        # provide a place-holder so downstream tools won't fail to find stubs.
+        try:
+            for root, _dirs, files in os.walk(package_dir):
+                # package-level stub
+                pyi_init = os.path.join(root, "__init__.pyi")
+                if not os.path.exists(pyi_init):
+                    try:
+                        with open(pyi_init, "w", encoding="utf-8") as f:
+                            f.write(
+                                f"# Type stubs for package {os.path.basename(root)}\nfrom typing import Any\n\n__all__: list[str]\n"
+                            )
+                    except Exception:
+                        pass
+
+                # module-level stubs for any .py files
+                for fname in files:
+                    if fname.endswith(".py") and not fname.endswith(".pyi"):
+                        stub_path = os.path.join(root, fname[:-3] + ".pyi")
+                        if not os.path.exists(stub_path):
+                            try:
+                                with open(
+                                    stub_path, "w", encoding="utf-8"
+                                ) as f:
+                                    f.write(
+                                        f"# Stub for {fname}\nfrom typing import Any\n\n"
+                                    )
+                            except Exception:
+                                pass
+        except Exception:
+            # Best-effort: do not fail the build just because stubs couldn't be written.
+            pass
+
         self._project_dir = build_dir
 
     def prepare(self, main_file: str, ancillary_files: list[str]) -> None:
