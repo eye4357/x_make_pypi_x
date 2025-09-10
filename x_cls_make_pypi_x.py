@@ -11,8 +11,10 @@ from typing import Any, Iterable
 # Inlined minimal helpers from x_make_common_x.helpers
 import logging
 import sys as _sys
+import subprocess as _subprocess
 
 _LOGGER = logging.getLogger("x_make")
+_os = os
 
 
 def _info(*args: Any) -> None:
@@ -48,11 +50,6 @@ def _error(*args: Any) -> None:
                 pass
 
 
-# Inlined minimal BaseMake subset used by this module
-import os as _os
-import subprocess as _subprocess
-
-
 class BaseMake:
     TOKEN_ENV_VAR: str = "GITHUB_TOKEN"
 
@@ -70,8 +67,12 @@ class BaseMake:
     def get_token(self) -> str | None:
         return _os.environ.get(self.TOKEN_ENV_VAR)
 
-    def run_cmd(self, args: Iterable[str], **kwargs: Any) -> _subprocess.CompletedProcess[str]:
-        return _subprocess.run(list(args), check=False, capture_output=True, text=True, **kwargs)
+    def run_cmd(
+        self, args: Iterable[str], **kwargs: Any
+    ) -> _subprocess.CompletedProcess[str]:
+        return _subprocess.run(
+            list(args), check=False, capture_output=True, text=True, **kwargs
+        )
 
 
 """Twine-backed PyPI publisher implementation (installed shim)."""
@@ -140,7 +141,10 @@ class x_cls_make_pypi_x(BaseMake):
         return
 
     def create_files(self, main_file: str, ancillary_files: list[str]) -> None:
-        """Create a minimal package tree in a temporary build directory and copy files."""
+        """
+        Create a minimal package tree in a temporary build directory and
+        copy files.
+        """
         package_name = self.name
         repo_build_root = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "_build_temp_x_pypi_x")
@@ -172,15 +176,22 @@ class x_cls_make_pypi_x(BaseMake):
             """
             # Keep the allow-list intentionally small: source and simple docs.
             _, ext = os.path.splitext(p.lower())
-            return ext in {".py", ".txt", ".md", ".rst"} or os.path.basename(p).lower() == "__init__.py"
+            allowed = {".py", ".txt", ".md", ".rst"}
+            return (
+                ext in allowed or os.path.basename(p).lower() == "__init__.py"
+            )
 
         # Copy ancillary files but only allow a small set of file types.
         for ancillary_path in ancillary_files or []:
             if os.path.isdir(ancillary_path):
-                dest = os.path.join(package_dir, os.path.basename(ancillary_path))
-                for root, dirs, files in os.walk(ancillary_path):
+                dest = os.path.join(
+                    package_dir, os.path.basename(ancillary_path)
+                )
+                for root, _dirs, files in os.walk(ancillary_path):
                     rel = os.path.relpath(root, ancillary_path)
-                    target_root = os.path.join(dest, rel) if rel != "." else dest
+                    target_root = (
+                        os.path.join(dest, rel) if rel != "." else dest
+                    )
                     os.makedirs(target_root, exist_ok=True)
                     for fname in files:
                         srcf = os.path.join(root, fname)
@@ -191,7 +202,9 @@ class x_cls_make_pypi_x(BaseMake):
                 if _is_allowed(ancillary_path):
                     shutil.copy2(
                         ancillary_path,
-                        os.path.join(package_dir, os.path.basename(ancillary_path)),
+                        os.path.join(
+                            package_dir, os.path.basename(ancillary_path)
+                        ),
                     )
 
         self._project_dir = build_dir
@@ -212,9 +225,11 @@ class x_cls_make_pypi_x(BaseMake):
         """
         # If version already exists, skip
         if self.version_exists_on_pypi():
-            _info(
-                f"SKIP: {self.name} version {self.version} already exists on PyPI. Skipping publish."
+            msg = (
+                f"SKIP: {self.name} version {self.version} already "
+                "exists on PyPI. Skipping publish."
             )
+            _info(msg)
             return True
         self.create_files(main_file, ancillary_files or [])
         project_dir = self._project_dir
@@ -257,9 +272,9 @@ class x_cls_make_pypi_x(BaseMake):
             )
             if not has_pypirc and not has_env_creds:
                 _info(
-                    "WARNING: No PyPI credentials found (.pypirc or TWINE env vars). Upload will likely fail."
+                    "WARNING: No PyPI credentials found (.pypirc or TWINE env vars)."
+                    " Upload will likely fail."
                 )
-            import subprocess
 
             # Respect an environment toggle to skip uploading files that already
             # exist on PyPI. Default to True to avoid failing the overall run when
@@ -274,12 +289,15 @@ class x_cls_make_pypi_x(BaseMake):
                     "--skip-existing",
                     *files,
                 ]
-                _info("Running upload (with --skip-existing):", " ".join(twine_cmd))
+                _info(
+                    "Running upload (with --skip-existing):",
+                    " ".join(twine_cmd),
+                )
             else:
                 twine_cmd = [sys.executable, "-m", "twine", "upload", *files]
                 _info("Running upload:", " ".join(twine_cmd))
 
-            result = subprocess.run(
+            result = _subprocess.run(
                 twine_cmd,
                 check=False,
                 capture_output=True,
