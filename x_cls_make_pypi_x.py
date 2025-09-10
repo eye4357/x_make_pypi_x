@@ -6,8 +6,72 @@ import shutil
 import sys
 import urllib.request
 import uuid
-from typing import Any
-from x_make_common_x.x_cls_make_common_x import BaseMake
+from typing import Any, Iterable
+
+# Inlined minimal helpers from x_make_common_x.helpers
+import logging
+import sys as _sys
+
+_LOGGER = logging.getLogger("x_make")
+
+
+def _info(*args: Any) -> None:
+    msg = " ".join(str(a) for a in args)
+    try:
+        _LOGGER.info("%s", msg)
+    except Exception:
+        pass
+    try:
+        print(msg)
+    except Exception:
+        try:
+            _sys.stdout.write(msg + "\n")
+        except Exception:
+            pass
+
+
+def _error(*args: Any) -> None:
+    msg = " ".join(str(a) for a in args)
+    try:
+        _LOGGER.error("%s", msg)
+    except Exception:
+        pass
+    try:
+        print(msg, file=_sys.stderr)
+    except Exception:
+        try:
+            _sys.stderr.write(msg + "\n")
+        except Exception:
+            try:
+                print(msg)
+            except Exception:
+                pass
+
+
+# Inlined minimal BaseMake subset used by this module
+import os as _os
+import subprocess as _subprocess
+
+
+class BaseMake:
+    TOKEN_ENV_VAR: str = "GITHUB_TOKEN"
+
+    @classmethod
+    def get_env(cls, name: str, default: Any = None) -> Any:
+        return _os.environ.get(name, default)
+
+    @classmethod
+    def get_env_bool(cls, name: str, default: bool = False) -> bool:
+        v = _os.environ.get(name, None)
+        if v is None:
+            return default
+        return str(v).lower() in ("1", "true", "yes")
+
+    def get_token(self) -> str | None:
+        return _os.environ.get(self.TOKEN_ENV_VAR)
+
+    def run_cmd(self, args: Iterable[str], **kwargs: Any) -> _subprocess.CompletedProcess[str]:
+        return _subprocess.run(list(args), check=False, capture_output=True, text=True, **kwargs)
 
 
 """Twine-backed PyPI publisher implementation (installed shim)."""
@@ -27,8 +91,6 @@ class x_cls_make_pypi_x(BaseMake):
                 data = json.load(response)
             return self.version in data.get("releases", {})
         except Exception as e:
-            from x_make_common_x.helpers import info as _info
-
             _info(
                 f"WARNING: Could not check PyPI for {self.name}=={self.version}: {e}"
             )
@@ -69,8 +131,6 @@ class x_cls_make_pypi_x(BaseMake):
 
         # Print preparation message when verbose is requested (or always is OK)
         if getattr(self._ctx, "verbose", False):
-            from x_make_common_x.helpers import info as _info
-
             _info(f"[pypi] prepared publisher for {self.name}=={self.version}")
 
     def update_pyproject_toml(self, project_dir: str) -> None:
@@ -152,97 +212,91 @@ class x_cls_make_pypi_x(BaseMake):
         """
         # If version already exists, skip
         if self.version_exists_on_pypi():
-            from x_make_common_x.helpers import info as _info
-
             _info(
                 f"SKIP: {self.name} version {self.version} already exists on PyPI. Skipping publish."
             )
             return True
-
         self.create_files(main_file, ancillary_files or [])
         project_dir = self._project_dir
-        os.chdir(project_dir)
+        cwd = os.getcwd()
+        try:
+            os.chdir(project_dir)
 
-        dist_dir = os.path.join(project_dir, "dist")
-        if os.path.exists(dist_dir):
-            shutil.rmtree(dist_dir)
+            dist_dir = os.path.join(project_dir, "dist")
+            if os.path.exists(dist_dir):
+                shutil.rmtree(dist_dir)
 
-        build_cmd = [sys.executable, "-m", "build"]
-        from x_make_common_x.helpers import info as _info
+            build_cmd = [sys.executable, "-m", "build"]
+            _info("Running build:", " ".join(build_cmd))
+            rc = os.system(" ".join(build_cmd))
+            if rc != 0:
+                raise RuntimeError("Build failed. Aborting publish.")
 
-        _info("Running build:", " ".join(build_cmd))
-        rc = os.system(" ".join(build_cmd))
-        if rc != 0:
-            raise RuntimeError("Build failed. Aborting publish.")
+            if not os.path.exists(dist_dir):
+                raise RuntimeError("dist/ directory not found after build.")
 
-        if not os.path.exists(dist_dir):
-            raise RuntimeError("dist/ directory not found after build.")
-
-        files = [
-            os.path.join(dist_dir, f)
-            for f in os.listdir(dist_dir)
-            if f.startswith(f"{self.name}-{self.version}")
-            and f.endswith((".tar.gz", ".whl"))
-        ]
-        if not files:
-            raise RuntimeError(
-                "No valid distribution files found. Aborting publish."
-            )
-
-        pypirc_path = os.path.expanduser("~/.pypirc")
-        has_pypirc = os.path.exists(pypirc_path)
-        has_env_creds = any(
-            [
-                self.get_env("TWINE_USERNAME"),
-                self.get_env("TWINE_PASSWORD"),
-                self.get_env("TWINE_API_TOKEN"),
+            files = [
+                os.path.join(dist_dir, f)
+                for f in os.listdir(dist_dir)
+                if f.startswith(f"{self.name}-{self.version}")
+                and f.endswith((".tar.gz", ".whl"))
             ]
-        )
-        if not has_pypirc and not has_env_creds:
-            from x_make_common_x.helpers import info as _info
+            if not files:
+                raise RuntimeError(
+                    "No valid distribution files found. Aborting publish."
+                )
 
-            _info(
-                "WARNING: No PyPI credentials found (.pypirc or TWINE env vars). Upload will likely fail."
+            pypirc_path = os.path.expanduser("~/.pypirc")
+            has_pypirc = os.path.exists(pypirc_path)
+            has_env_creds = any(
+                [
+                    self.get_env("TWINE_USERNAME"),
+                    self.get_env("TWINE_PASSWORD"),
+                    self.get_env("TWINE_API_TOKEN"),
+                ]
             )
-        import subprocess
+            if not has_pypirc and not has_env_creds:
+                _info(
+                    "WARNING: No PyPI credentials found (.pypirc or TWINE env vars). Upload will likely fail."
+                )
+            import subprocess
 
-        # Respect an environment toggle to skip uploading files that already
-        # exist on PyPI. Default to True to avoid failing the overall run when
-        # package files are already present (common in retry scenarios).
-        skip_existing = self.get_env_bool("TWINE_SKIP_EXISTING", True)
-        if skip_existing:
-            twine_cmd = [
-                sys.executable,
-                "-m",
-                "twine",
-                "upload",
-                "--skip-existing",
-                *files,
-            ]
-            from x_make_common_x.helpers import info as _info
+            # Respect an environment toggle to skip uploading files that already
+            # exist on PyPI. Default to True to avoid failing the overall run when
+            # package files are already present (common in retry scenarios).
+            skip_existing = self.get_env_bool("TWINE_SKIP_EXISTING", True)
+            if skip_existing:
+                twine_cmd = [
+                    sys.executable,
+                    "-m",
+                    "twine",
+                    "upload",
+                    "--skip-existing",
+                    *files,
+                ]
+                _info("Running upload (with --skip-existing):", " ".join(twine_cmd))
+            else:
+                twine_cmd = [sys.executable, "-m", "twine", "upload", *files]
+                _info("Running upload:", " ".join(twine_cmd))
 
-            _info("Running upload (with --skip-existing):", " ".join(twine_cmd))
-        else:
-            twine_cmd = [sys.executable, "-m", "twine", "upload", *files]
-            from x_make_common_x.helpers import info as _info
-
-            _info("Running upload:", " ".join(twine_cmd))
-
-        result = subprocess.run(
-            twine_cmd,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        from x_make_common_x.helpers import info as _info, error as _error
-
-        if result.stdout:
-            _info(result.stdout)
-        if result.stderr:
-            _error(result.stderr)
-        if result.returncode != 0:
-            raise RuntimeError("Twine upload failed. See output above.")
-        return True
+            result = subprocess.run(
+                twine_cmd,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if result.stdout:
+                _info(result.stdout)
+            if result.stderr:
+                _error(result.stderr)
+            if result.returncode != 0:
+                raise RuntimeError("Twine upload failed. See output above.")
+            return True
+        finally:
+            try:
+                os.chdir(cwd)
+            except Exception:
+                pass
 
     def prepare_and_publish(
         self, main_file: str, ancillary_files: list[str]
