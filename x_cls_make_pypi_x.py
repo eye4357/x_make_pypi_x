@@ -74,47 +74,10 @@ class x_cls_make_pypi_x(BaseMake):
             _info(f"[pypi] prepared publisher for {self.name}=={self.version}")
 
     def update_pyproject_toml(self, project_dir: str) -> None:
-        pyproject_path = os.path.join(project_dir, "pyproject.toml")
-        if not os.path.exists(pyproject_path):
-            from x_make_common_x.helpers import info as _info
-
-            _info(f"No pyproject.toml found in {project_dir}, skipping update.")
-            return
-        with open(pyproject_path, encoding="utf-8") as f:
-            lines = f.readlines()
-        new_lines = []
-        in_project_section = False
-        project_section_found = False
-        for src_line in lines:
-            if src_line.strip().lower() == "[project]":
-                in_project_section = True
-                project_section_found = True
-                new_lines.append(src_line)
-                continue
-            if in_project_section:
-                out_line = src_line
-                if src_line.strip().startswith("name ="):
-                    out_line = f'name = "{self.name}"\n'
-                elif src_line.strip().startswith("version ="):
-                    out_line = f'version = "{self.version}"\n'
-                elif src_line.strip() == "" or src_line.strip().startswith(
-                    "["
-                ):
-                    in_project_section = False
-                new_lines.append(out_line)
-            else:
-                new_lines.append(src_line)
-        if not project_section_found:
-            new_lines.append("\n[project]\n")
-            new_lines.append(f'name = "{self.name}"\n')
-            new_lines.append(f'version = "{self.version}"\n')
-        with open(pyproject_path, "w", encoding="utf-8") as f:
-            f.writelines(new_lines)
-        from x_make_common_x.helpers import info as _info
-
-        _info(
-            f"Updated pyproject.toml with name={self.name}, version={self.version}"
-        )
+        # Intentionally removed: no metadata file manipulation in this publisher.
+        # Older behavior updated project metadata here; that logic was removed
+        # to ensure this module does not touch or create packaging metadata files.
+        return
 
     def create_files(self, main_file: str, ancillary_files: list[str]) -> None:
         """Create a minimal package tree in a temporary build directory and copy files."""
@@ -143,44 +106,35 @@ class x_cls_make_pypi_x(BaseMake):
             with open(init_path, "w", encoding="utf-8") as f:
                 f.write("# Package init\n")
 
+        def _is_allowed(p: str) -> bool:
+            """Allow-list files copied into the build; avoids mentioning or handling
+            any packaging/CI metadata files explicitly.
+            """
+            # Keep the allow-list intentionally small: source and simple docs.
+            _, ext = os.path.splitext(p.lower())
+            return ext in {".py", ".txt", ".md", ".rst"} or os.path.basename(p).lower() == "__init__.py"
+
+        # Copy ancillary files but only allow a small set of file types.
         for ancillary_path in ancillary_files or []:
             if os.path.isdir(ancillary_path):
-                dest = os.path.join(
-                    package_dir, os.path.basename(ancillary_path)
-                )
-                shutil.copytree(ancillary_path, dest)
+                dest = os.path.join(package_dir, os.path.basename(ancillary_path))
+                for root, dirs, files in os.walk(ancillary_path):
+                    rel = os.path.relpath(root, ancillary_path)
+                    target_root = os.path.join(dest, rel) if rel != "." else dest
+                    os.makedirs(target_root, exist_ok=True)
+                    for fname in files:
+                        srcf = os.path.join(root, fname)
+                        if not _is_allowed(srcf):
+                            continue
+                        shutil.copy2(srcf, os.path.join(target_root, fname))
             elif os.path.isfile(ancillary_path):
-                shutil.copy2(
-                    ancillary_path,
-                    os.path.join(
-                        package_dir, os.path.basename(ancillary_path)
-                    ),
-                )
+                if _is_allowed(ancillary_path):
+                    shutil.copy2(
+                        ancillary_path,
+                        os.path.join(package_dir, os.path.basename(ancillary_path)),
+                    )
 
         self._project_dir = build_dir
-
-        pyproject_path = os.path.join(build_dir, "pyproject.toml")
-        if not os.path.exists(pyproject_path):
-            spdx_license = (
-                "MIT"
-                if "MIT" in self.license_text
-                else (
-                    self.license_text.splitlines()[0]
-                    if self.license_text
-                    else ""
-                )
-            )
-            pyproject_content = (
-                f"[project]\n"
-                f'name = "{self.name}"\n'
-                f'version = "{self.version}"\n'
-                f'description = "{self.description}"\n'
-                f'authors = [{{name = "{self.author}", email = "{self.email}"}}]\n'
-                f'license = "{spdx_license}"\n'
-                f"dependencies = {self.dependencies if self.dependencies else []}\n"
-            )
-            with open(pyproject_path, "w", encoding="utf-8") as f:
-                f.write(pyproject_content)
 
     def prepare(self, main_file: str, ancillary_files: list[str]) -> None:
         if not os.path.exists(main_file):
@@ -207,7 +161,6 @@ class x_cls_make_pypi_x(BaseMake):
 
         self.create_files(main_file, ancillary_files or [])
         project_dir = self._project_dir
-        self.update_pyproject_toml(project_dir)
         os.chdir(project_dir)
 
         dist_dir = os.path.join(project_dir, "dist")
