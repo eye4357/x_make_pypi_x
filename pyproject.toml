@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = 'x_4357_make_pypi_x'
-version = '0.0.0'
+version = '0.4.0'
 description = "Makes PyPI packages."
 readme = "README.md"
 license = {text = "MIT License (c) 2025 RRGM of the Primus Pilus Night Watch AI Corporation"}

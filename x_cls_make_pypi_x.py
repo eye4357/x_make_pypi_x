@@ -140,28 +140,42 @@ class x_cls_make_pypi_x(BaseMake):
         # to ensure this module does not touch or create packaging metadata files.
         return
 
-    def _pep561_enhance(self, build_dir: str, package_dir: str) -> None:
-        """Inject PEP 561 artifacts (py.typed + MANIFEST/pyproject adjustments).
-        Safe/idempotent; never raises. Executed before build so wheel/sdist
-        includes typing markers and generated minimal .pyi stubs already created.
+    def _pep561_enhance(self, build_dir: str, package_dir: str, ancillary_files: list[str] | None = None) -> None:  # type: ignore[override]
+        """Inject PEP 561 artifacts and minimal build metadata (pyproject / MANIFEST).
+        Ensures: py.typed, stub include lines, ancillary text resources, and a
+        minimal pyproject.toml containing the intended project metadata so the
+        built distributions carry the correct version instead of defaulting to 0.0.0.
+        Idempotent and resilient to failures.
         """
         try:
-            import os as _os2
             from pathlib import Path as _P
             pkg_path = _P(package_dir)
-            # 1. py.typed
+            bd = _P(build_dir)
+            # --- py.typed ---
             py_typed = pkg_path / 'py.typed'
             if not py_typed.exists():
                 try:
                     py_typed.write_text('', encoding='utf-8')
                 except Exception:
                     return
-            # 2. MANIFEST.in entries
-            manifest = _P(build_dir) / 'MANIFEST.in'
-            needed = [f'include {pkg_path.name}/py.typed']
-            # only add recursive-include if .pyi present
+            # --- Ancillary relative names (only simple text/doc files) ---
+            anc_rel: list[str] = []
+            for a in ancillary_files or []:
+                try:
+                    ap = _P(a)
+                    if ap.is_file():
+                        if ap.suffix.lower() in {'.txt', '.md', '.rst'}:
+                            # copy already performed; ensure name recorded
+                            anc_rel.append(f"{pkg_path.name}/{ap.name}")
+                except Exception:
+                    continue
+            # --- MANIFEST.in ---
+            manifest = bd / 'MANIFEST.in'
+            needed: list[str] = [f'include {pkg_path.name}/py.typed']
             if any(p.suffix == '.pyi' for p in pkg_path.rglob('*') if p.is_file()):
                 needed.append(f'recursive-include {pkg_path.name} *.pyi')
+            for rel in anc_rel:
+                needed.append(f'include {rel}')
             try:
                 lines: list[str] = []
                 existing = set()
@@ -177,26 +191,52 @@ class x_cls_make_pypi_x(BaseMake):
                     manifest.write_text('\n'.join(lines) + '\n', encoding='utf-8')
             except Exception:
                 pass
-            # 3. pyproject.toml include-package-data hint (best effort)
-            pyproject = _P(build_dir) / 'pyproject.toml'
+            # --- pyproject.toml (ensure version + metadata) ---
+            pyproject = bd / 'pyproject.toml'
             try:
-                if pyproject.exists():
+                base_pyproject = (
+                    '[build-system]\n'
+                    'requires = ["setuptools", "wheel"]\n'
+                    'build-backend = "setuptools.build_meta"\n\n'
+                    '[project]\n'
+                    f'name = "{self.name}"\n'
+                    f'version = "{self.version}"\n'
+                    f'description = "{self.description or f"Package {self.name}"}"\n'
+                    'requires-python = ">=3.8"\n'
+                )
+                # authors
+                if self.author or self.email:
+                    auth_name = self.author or "Unknown"
+                    auth_email = self.email or "unknown@example.com"
+                    base_pyproject += f'authors = [{{name = "{auth_name}", email = "{auth_email}"}}]\n'
+                # dependencies
+                if self.dependencies:
+                    deps_serial = ",\n    ".join(f'"{d}"' for d in self.dependencies)
+                    base_pyproject += f'dependencies = [\n    {deps_serial}\n]\n'
+                # include-package-data hint for our artifacts
+                base_pyproject += '\n[tool.setuptools]\ninclude-package-data = true\n'
+                if not pyproject.exists():
+                    pyproject.write_text(base_pyproject, encoding='utf-8')
+                else:
                     txt = pyproject.read_text(encoding='utf-8')
+                    changed = False
+                    if 'name =' not in txt or 'version =' not in txt:
+                        txt += '\n' + base_pyproject
+                        changed = True
                     if 'include-package-data' not in txt:
                         if '[tool.setuptools]' in txt:
                             txt += '\ninclude-package-data = true\n'
                         else:
                             txt += '\n[tool.setuptools]\ninclude-package-data = true\n'
+                        changed = True
+                    if changed:
                         pyproject.write_text(txt, encoding='utf-8')
-                else:
-                    # Do not attempt to fully author project metadata; only add the minimal flag.
-                    pyproject.write_text('[tool.setuptools]\ninclude-package-data = true\n', encoding='utf-8')
             except Exception:
                 pass
         except Exception:
             pass
 
-    def create_files(self, main_file: str, ancillary_files: list[str]) -> None:
+    def create_files(self, main_file: str, ancillary_files: list[str]) -> None:  # type: ignore[override]
         """
         Create a minimal package tree in a temporary build directory and
         copy files.
@@ -298,9 +338,9 @@ class x_cls_make_pypi_x(BaseMake):
             # Best-effort: do not fail the build just because stubs couldn't be written.
             pass
 
-        # After stubs generated, ensure PEP 561 artifacts
+        # After stubs generated, ensure PEP 561 artifacts & metadata
         try:
-            self._pep561_enhance(build_dir, package_dir)
+            self._pep561_enhance(build_dir, package_dir, ancillary_files)
         except Exception:
             pass
         self._project_dir = build_dir
