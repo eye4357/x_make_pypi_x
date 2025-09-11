@@ -141,7 +141,10 @@ class x_cls_make_pypi_x(BaseMake):
         return
 
     def ensure_type_metadata(
-        self, repo_name: str, base_dir: str, ancillary_files: list[str] | None = None
+        self,
+        repo_name: str,
+        base_dir: str,
+        ancillary_files: list[str] | None = None,
     ) -> None:
         """Inject PEP 561 artifacts and minimal build metadata (pyproject / MANIFEST).
         Security: only include explicit ancillary files; no wildcard or recursive patterns.
@@ -161,7 +164,7 @@ class x_cls_make_pypi_x(BaseMake):
             manifest_lines: list[str] = [
                 "include py.typed",
             ]
-            for a in (ancillary_files or []):
+            for a in ancillary_files or []:
                 try:
                     if os.path.isfile(a):
                         rel = os.path.relpath(a, base_dir)
