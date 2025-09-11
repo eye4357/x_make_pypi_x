@@ -140,47 +140,54 @@ class x_cls_make_pypi_x(BaseMake):
         # to ensure this module does not touch or create packaging metadata files.
         return
 
-    def _pep561_enhance(self, build_dir: str, package_dir: str, ancillary_files: list[str] | None = None) -> None:  # type: ignore[override]
+    def _pep561_enhance(
+        self,
+        build_dir: str,
+        package_dir: str,
+        ancillary_files: list[str] | None = None,
+    ) -> None:
         """Inject PEP 561 artifacts and minimal build metadata (pyproject / MANIFEST).
-        Ensures: py.typed, stub include lines, ancillary text resources, and a
-        minimal pyproject.toml containing the intended project metadata so the
-        built distributions carry the correct version instead of defaulting to 0.0.0.
-        Idempotent and resilient to failures.
+        Updated to include recursive ancillary data patterns so text resources ship.
         """
         try:
             from pathlib import Path as _P
+
             pkg_path = _P(package_dir)
             bd = _P(build_dir)
-            # --- py.typed ---
-            py_typed = pkg_path / 'py.typed'
+            py_typed = pkg_path / "py.typed"
             if not py_typed.exists():
                 try:
-                    py_typed.write_text('', encoding='utf-8')
+                    py_typed.write_text("", encoding="utf-8")
                 except Exception:
                     return
-            # --- Ancillary relative names (only simple text/doc files) ---
             anc_rel: list[str] = []
             for a in ancillary_files or []:
                 try:
                     ap = _P(a)
-                    if ap.is_file():
-                        if ap.suffix.lower() in {'.txt', '.md', '.rst'}:
-                            # copy already performed; ensure name recorded
-                            anc_rel.append(f"{pkg_path.name}/{ap.name}")
+                    if (
+                        ap.is_file()
+                        and ap.parent == pkg_path
+                        and ap.suffix.lower() in {".txt", ".md", ".rst"}
+                    ):
+                        anc_rel.append(f"{pkg_path.name}/{ap.name}")
                 except Exception:
                     continue
-            # --- MANIFEST.in ---
-            manifest = bd / 'MANIFEST.in'
-            needed: list[str] = [f'include {pkg_path.name}/py.typed']
-            if any(p.suffix == '.pyi' for p in pkg_path.rglob('*') if p.is_file()):
-                needed.append(f'recursive-include {pkg_path.name} *.pyi')
+            manifest = bd / "MANIFEST.in"
+            needed: list[str] = [
+                f"include {pkg_path.name}/py.typed",
+                f"recursive-include {pkg_path.name} *.txt *.md *.rst",
+            ]
+            if any(
+                p.suffix == ".pyi" for p in pkg_path.rglob("*") if p.is_file()
+            ):
+                needed.append(f"recursive-include {pkg_path.name} *.pyi")
             for rel in anc_rel:
-                needed.append(f'include {rel}')
+                needed.append(f"include {rel}")
             try:
                 lines: list[str] = []
                 existing = set()
                 if manifest.exists():
-                    lines = manifest.read_text(encoding='utf-8').splitlines()
+                    lines = manifest.read_text(encoding="utf-8").splitlines()
                     existing = set(lines)
                 changed = False
                 for line in needed:
@@ -188,55 +195,69 @@ class x_cls_make_pypi_x(BaseMake):
                         lines.append(line)
                         changed = True
                 if changed:
-                    manifest.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+                    manifest.write_text(
+                        "\n".join(lines) + "\n", encoding="utf-8"
+                    )
             except Exception:
                 pass
-            # --- pyproject.toml (ensure version + metadata) ---
-            pyproject = bd / 'pyproject.toml'
+            pyproject = bd / "pyproject.toml"
             try:
                 base_pyproject = (
-                    '[build-system]\n'
+                    "[build-system]\n"
                     'requires = ["setuptools", "wheel"]\n'
                     'build-backend = "setuptools.build_meta"\n\n'
-                    '[project]\n'
+                    "[project]\n"
                     f'name = "{self.name}"\n'
                     f'version = "{self.version}"\n'
                     f'description = "{self.description or f"Package {self.name}"}"\n'
                     'requires-python = ">=3.8"\n'
                 )
-                # authors
                 if self.author or self.email:
                     auth_name = self.author or "Unknown"
                     auth_email = self.email or "unknown@example.com"
                     base_pyproject += f'authors = [{{name = "{auth_name}", email = "{auth_email}"}}]\n'
-                # dependencies
                 if self.dependencies:
-                    deps_serial = ",\n    ".join(f'"{d}"' for d in self.dependencies)
-                    base_pyproject += f'dependencies = [\n    {deps_serial}\n]\n'
-                # include-package-data hint for our artifacts
-                base_pyproject += '\n[tool.setuptools]\ninclude-package-data = true\n'
+                    deps_serial = ",\n    ".join(
+                        f'"{d}"' for d in self.dependencies
+                    )
+                    base_pyproject += (
+                        f"dependencies = [\n    {deps_serial}\n]\n"
+                    )
+                base_pyproject += (
+                    "\n[tool.setuptools]\ninclude-package-data = true\n"
+                    '\n[tool.setuptools.packages.find]\nwhere = ["."]\n'
+                    f'include = ["{pkg_path.name}"]\n'
+                    "\n[tool.setuptools.package-data]\n"
+                    f'{pkg_path.name} = ["*.pyi", "py.typed", "*.txt", "*.md", "*.rst"]\n'
+                )
                 if not pyproject.exists():
-                    pyproject.write_text(base_pyproject, encoding='utf-8')
+                    pyproject.write_text(base_pyproject, encoding="utf-8")
                 else:
-                    txt = pyproject.read_text(encoding='utf-8')
+                    txt = pyproject.read_text(encoding="utf-8")
                     changed = False
-                    if 'name =' not in txt or 'version =' not in txt:
-                        txt += '\n' + base_pyproject
-                        changed = True
-                    if 'include-package-data' not in txt:
-                        if '[tool.setuptools]' in txt:
-                            txt += '\ninclude-package-data = true\n'
+                    if "include-package-data" not in txt:
+                        if "[tool.setuptools]" in txt:
+                            txt += "\ninclude-package-data = true\n"
                         else:
-                            txt += '\n[tool.setuptools]\ninclude-package-data = true\n'
+                            txt += "\n[tool.setuptools]\ninclude-package-data = true\n"
+                        changed = True
+                    if "[tool.setuptools.package-data]" not in txt:
+                        txt += f'\n[tool.setuptools.package-data]\n{pkg_path.name} = ["*.pyi", "py.typed", "*.txt", "*.md", "*.rst"]\n'
+                        changed = True
+                    if "[tool.setuptools.packages.find]" not in txt:
+                        txt += '\n[tool.setuptools.packages.find]\nwhere = ["."]\n'
+                        changed = True
+                    if "name =" not in txt or "version =" not in txt:
+                        txt += "\n" + base_pyproject
                         changed = True
                     if changed:
-                        pyproject.write_text(txt, encoding='utf-8')
+                        pyproject.write_text(txt, encoding="utf-8")
             except Exception:
                 pass
         except Exception:
             pass
 
-    def create_files(self, main_file: str, ancillary_files: list[str]) -> None:  # type: ignore[override]
+    def create_files(self, main_file: str, ancillary_files: list[str]) -> None:
         """
         Create a minimal package tree in a temporary build directory and
         copy files.
