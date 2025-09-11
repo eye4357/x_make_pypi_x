@@ -140,6 +140,62 @@ class x_cls_make_pypi_x(BaseMake):
         # to ensure this module does not touch or create packaging metadata files.
         return
 
+    def _pep561_enhance(self, build_dir: str, package_dir: str) -> None:
+        """Inject PEP 561 artifacts (py.typed + MANIFEST/pyproject adjustments).
+        Safe/idempotent; never raises. Executed before build so wheel/sdist
+        includes typing markers and generated minimal .pyi stubs already created.
+        """
+        try:
+            import os as _os2
+            from pathlib import Path as _P
+            pkg_path = _P(package_dir)
+            # 1. py.typed
+            py_typed = pkg_path / 'py.typed'
+            if not py_typed.exists():
+                try:
+                    py_typed.write_text('', encoding='utf-8')
+                except Exception:
+                    return
+            # 2. MANIFEST.in entries
+            manifest = _P(build_dir) / 'MANIFEST.in'
+            needed = [f'include {pkg_path.name}/py.typed']
+            # only add recursive-include if .pyi present
+            if any(p.suffix == '.pyi' for p in pkg_path.rglob('*') if p.is_file()):
+                needed.append(f'recursive-include {pkg_path.name} *.pyi')
+            try:
+                lines: list[str] = []
+                existing = set()
+                if manifest.exists():
+                    lines = manifest.read_text(encoding='utf-8').splitlines()
+                    existing = set(lines)
+                changed = False
+                for line in needed:
+                    if line not in existing:
+                        lines.append(line)
+                        changed = True
+                if changed:
+                    manifest.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+            except Exception:
+                pass
+            # 3. pyproject.toml include-package-data hint (best effort)
+            pyproject = _P(build_dir) / 'pyproject.toml'
+            try:
+                if pyproject.exists():
+                    txt = pyproject.read_text(encoding='utf-8')
+                    if 'include-package-data' not in txt:
+                        if '[tool.setuptools]' in txt:
+                            txt += '\ninclude-package-data = true\n'
+                        else:
+                            txt += '\n[tool.setuptools]\ninclude-package-data = true\n'
+                        pyproject.write_text(txt, encoding='utf-8')
+                else:
+                    # Do not attempt to fully author project metadata; only add the minimal flag.
+                    pyproject.write_text('[tool.setuptools]\ninclude-package-data = true\n', encoding='utf-8')
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     def create_files(self, main_file: str, ancillary_files: list[str]) -> None:
         """
         Create a minimal package tree in a temporary build directory and
@@ -242,6 +298,11 @@ class x_cls_make_pypi_x(BaseMake):
             # Best-effort: do not fail the build just because stubs couldn't be written.
             pass
 
+        # After stubs generated, ensure PEP 561 artifacts
+        try:
+            self._pep561_enhance(build_dir, package_dir)
+        except Exception:
+            pass
         self._project_dir = build_dir
 
     def prepare(self, main_file: str, ancillary_files: list[str]) -> None:
