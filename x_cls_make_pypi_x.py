@@ -140,64 +140,42 @@ class x_cls_make_pypi_x(BaseMake):
         # to ensure this module does not touch or create packaging metadata files.
         return
 
-    def _pep561_enhance(
-        self,
-        build_dir: str,
-        package_dir: str,
-        ancillary_files: list[str] | None = None,
+    def ensure_type_metadata(
+        self, repo_name: str, base_dir: str, ancillary_files: list[str] | None = None
     ) -> None:
         """Inject PEP 561 artifacts and minimal build metadata (pyproject / MANIFEST).
-        Updated to include recursive ancillary data patterns so text resources ship.
+        Security: only include explicit ancillary files; no wildcard or recursive patterns.
         """
         try:
             from pathlib import Path as _P
 
-            pkg_path = _P(package_dir)
-            bd = _P(build_dir)
+            pkg_path = _P(base_dir)
+            bd = _P(repo_name)
             py_typed = pkg_path / "py.typed"
             if not py_typed.exists():
                 try:
                     py_typed.write_text("", encoding="utf-8")
                 except Exception:
                     return
-            anc_rel: list[str] = []
-            for a in ancillary_files or []:
-                try:
-                    ap = _P(a)
-                    if (
-                        ap.is_file()
-                        and ap.parent == pkg_path
-                        and ap.suffix.lower() in {".txt", ".md", ".rst"}
-                    ):
-                        anc_rel.append(f"{pkg_path.name}/{ap.name}")
-                except Exception:
-                    continue
-            manifest = bd / "MANIFEST.in"
-            needed: list[str] = [
-                f"include {pkg_path.name}/py.typed",
-                f"recursive-include {pkg_path.name} *.txt *.md *.rst",
+            # Build MANIFEST.in with explicit includes only
+            manifest_lines: list[str] = [
+                "include py.typed",
             ]
-            if any(
-                p.suffix == ".pyi" for p in pkg_path.rglob("*") if p.is_file()
-            ):
-                needed.append(f"recursive-include {pkg_path.name} *.pyi")
-            for rel in anc_rel:
-                needed.append(f"include {rel}")
+            for a in (ancillary_files or []):
+                try:
+                    if os.path.isfile(a):
+                        rel = os.path.relpath(a, base_dir)
+                        # Normalize to forward slashes for MANIFEST portability
+                        manifest_lines.append(
+                            f"include {rel.replace('\\\\', '/').replace('\\', '/')}"
+                        )
+                except Exception:
+                    # Ignore bad ancillary entries silently
+                    continue
+            man_path = os.path.join(base_dir, "MANIFEST.in")
             try:
-                lines: list[str] = []
-                existing = set()
-                if manifest.exists():
-                    lines = manifest.read_text(encoding="utf-8").splitlines()
-                    existing = set(lines)
-                changed = False
-                for line in needed:
-                    if line not in existing:
-                        lines.append(line)
-                        changed = True
-                if changed:
-                    manifest.write_text(
-                        "\n".join(lines) + "\n", encoding="utf-8"
-                    )
+                with open(man_path, "w", encoding="utf-8") as f:
+                    f.write("\n".join(manifest_lines) + "\n")
             except Exception:
                 pass
             pyproject = bd / "pyproject.toml"
@@ -361,7 +339,7 @@ class x_cls_make_pypi_x(BaseMake):
 
         # After stubs generated, ensure PEP 561 artifacts & metadata
         try:
-            self._pep561_enhance(build_dir, package_dir, ancillary_files)
+            self.ensure_type_metadata(build_dir, package_dir, ancillary_files)
         except Exception:
             pass
         self._project_dir = build_dir
