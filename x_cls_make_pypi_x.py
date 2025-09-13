@@ -41,13 +41,7 @@ def _error(*args: Any) -> None:
     try:
         print(msg, file=_sys.stderr)
     except Exception:
-        try:
-            _sys.stderr.write(msg + "\n")
-        except Exception:
-            try:
-                print(msg)
-            except Exception:
-                pass
+        pass
 
 
 class BaseMake:
@@ -146,41 +140,41 @@ class x_cls_make_pypi_x(BaseMake):
         base_dir: str,
         ancillary_files: list[str] | None = None,
     ) -> None:
-        """Inject PEP 561 artifacts and minimal build metadata (pyproject / MANIFEST).
-        Security: only include explicit ancillary files; no wildcard or recursive patterns.
-        """
+        """Inject PEP 561 artifacts and minimal build metadata without recursion."""
         try:
             from pathlib import Path as _P
 
-            pkg_path = _P(base_dir)
-            bd = _P(repo_name)
+            pkg_path = _P(base_dir)  # build_dir/<dist_name>
+            bd = _P(repo_name)  # build_dir (project root)
+
             py_typed = pkg_path / "py.typed"
             if not py_typed.exists():
                 try:
                     py_typed.write_text("", encoding="utf-8")
                 except Exception:
                     return
-            # Build MANIFEST.in with explicit includes only
+
+            # MANIFEST.in: only explicit includes under the package path
             manifest_lines: list[str] = [
-                "include py.typed",
+                f"include {pkg_path.name}/py.typed",
             ]
             for a in ancillary_files or []:
                 try:
-                    if os.path.isfile(a):
-                        rel = os.path.relpath(a, base_dir)
-                        # Normalize to forward slashes for MANIFEST portability
-                        manifest_lines.append(
-                            f"include {rel.replace('\\\\', '/').replace('\\', '/')}"
-                        )
+                    rel = a.replace("\\", "/").lstrip("/")
+                    if (pkg_path / rel).is_file():
+                        manifest_lines.append(f"include {pkg_path.name}/{rel}")
                 except Exception:
-                    # Ignore bad ancillary entries silently
                     continue
-            man_path = os.path.join(base_dir, "MANIFEST.in")
+            man_path = bd / "MANIFEST.in"
             try:
-                with open(man_path, "w", encoding="utf-8") as f:
-                    f.write("\n".join(manifest_lines) + "\n")
+                man_path.write_text(
+                    "\n".join(dict.fromkeys(manifest_lines)) + "\n",
+                    encoding="utf-8",
+                )
             except Exception:
                 pass
+
+            # pyproject: enable package-data, but no recursive globs
             pyproject = bd / "pyproject.toml"
             try:
                 base_pyproject = (
@@ -204,12 +198,13 @@ class x_cls_make_pypi_x(BaseMake):
                     base_pyproject += (
                         f"dependencies = [\n    {deps_serial}\n]\n"
                     )
+
                 base_pyproject += (
                     "\n[tool.setuptools]\ninclude-package-data = true\n"
                     '\n[tool.setuptools.packages.find]\nwhere = ["."]\n'
                     f'include = ["{pkg_path.name}"]\n'
                     "\n[tool.setuptools.package-data]\n"
-                    f'{pkg_path.name} = ["*.pyi", "py.typed", "*.txt", "*.md", "*.rst"]\n'
+                    f'{pkg_path.name} = ["py.typed"]\n'
                 )
                 if not pyproject.exists():
                     pyproject.write_text(base_pyproject, encoding="utf-8")
@@ -223,7 +218,7 @@ class x_cls_make_pypi_x(BaseMake):
                             txt += "\n[tool.setuptools]\ninclude-package-data = true\n"
                         changed = True
                     if "[tool.setuptools.package-data]" not in txt:
-                        txt += f'\n[tool.setuptools.package-data]\n{pkg_path.name} = ["*.pyi", "py.typed", "*.txt", "*.md", "*.rst"]\n'
+                        txt += f'\n[tool.setuptools.package-data]\n{pkg_path.name} = ["py.typed"]\n'
                         changed = True
                     if "[tool.setuptools.packages.find]" not in txt:
                         txt += '\n[tool.setuptools.packages.find]\nwhere = ["."]\n'
@@ -269,41 +264,26 @@ class x_cls_make_pypi_x(BaseMake):
                 f.write("# Package init\n")
 
         def _is_allowed(p: str) -> bool:
-            """Allow-list files copied into the build; avoids mentioning or handling
-            any packaging/CI metadata files explicitly.
-            """
-            # Keep the allow-list intentionally small: source and simple docs.
+            """Allow-list files copied into the build."""
             _, ext = os.path.splitext(p.lower())
             allowed = {".py", ".txt", ".md", ".rst"}
             return (
                 ext in allowed or os.path.basename(p).lower() == "__init__.py"
             )
 
-        # Copy ancillary files but only allow a small set of file types.
-        for ancillary_path in ancillary_files or []:
-            if os.path.isdir(ancillary_path):
-                dest = os.path.join(
-                    package_dir, os.path.basename(ancillary_path)
+        # Copy ancillaries: files only; do not recurse directories
+        for entry in ancillary_files or []:
+            rel_norm = entry.replace("\\", "/").lstrip("/")
+            src_path = rel_norm.replace("/", os.sep)
+            if os.path.isdir(src_path):
+                _info(
+                    f"Ignoring ancillary directory (no recursion): {rel_norm}"
                 )
-                for root, _dirs, files in os.walk(ancillary_path):
-                    rel = os.path.relpath(root, ancillary_path)
-                    target_root = (
-                        os.path.join(dest, rel) if rel != "." else dest
-                    )
-                    os.makedirs(target_root, exist_ok=True)
-                    for fname in files:
-                        srcf = os.path.join(root, fname)
-                        if not _is_allowed(srcf):
-                            continue
-                        shutil.copy2(srcf, os.path.join(target_root, fname))
-            elif os.path.isfile(ancillary_path):
-                if _is_allowed(ancillary_path):
-                    shutil.copy2(
-                        ancillary_path,
-                        os.path.join(
-                            package_dir, os.path.basename(ancillary_path)
-                        ),
-                    )
+                continue
+            if os.path.isfile(src_path) and _is_allowed(src_path):
+                dest_path = os.path.join(package_dir, src_path)
+                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                shutil.copy2(src_path, dest_path)
 
         # Ensure lightweight stub files (.pyi) exist for typing in every
         # package directory and for each copied module. These are minimal
