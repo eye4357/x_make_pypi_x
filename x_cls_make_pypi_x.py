@@ -196,11 +196,18 @@ class x_cls_make_pypi_x(BaseMake):
                     auth_email = self.email or "unknown@example.com"
                     base_pyproject += f'authors = [{{name = "{auth_name}", email = "{auth_email}"}}]\n'
                 if self.dependencies:
-                    deps_serial = ",\n    ".join(f'"{d}"' for d in self.dependencies)
-                    base_pyproject += f"dependencies = [\n    {deps_serial}\n]\n"
+                    deps_serial = ",\n    ".join(
+                        f'"{d}"' for d in self.dependencies
+                    )
+                    base_pyproject += (
+                        f"dependencies = [\n    {deps_serial}\n]\n"
+                    )
 
                 # Compose explicit package-data list
-                pkg_data_list = ['"py.typed"', *[f'"{rel}"' for rel in explicit_files]]
+                pkg_data_list = [
+                    '"py.typed"',
+                    *[f'"{rel}"' for rel in explicit_files],
+                ]
                 base_pyproject += (
                     "\n[tool.setuptools]\ninclude-package-data = true\n"
                     '\n[tool.setuptools.packages.find]\nwhere = ["."]\n'
@@ -227,7 +234,7 @@ class x_cls_make_pypi_x(BaseMake):
                         changed = True
                     # write/replace package-data block (append a fresh block with explicit entries)
                     pkg_data_block = (
-                        f'\n[tool.setuptools.package-data]\n'
+                        f"\n[tool.setuptools.package-data]\n"
                         f"{pkg_path.name} = [{', '.join(pkg_data_list)}]\n"
                     )
                     if "[tool.setuptools.package-data]" not in txt:
