@@ -147,6 +147,7 @@ class x_cls_make_pypi_x(BaseMake):
             pkg_path = _P(base_dir)  # build_dir/<dist_name>
             bd = _P(repo_name)  # build_dir (project root)
 
+            # Ensure py.typed exists
             py_typed = pkg_path / "py.typed"
             if not py_typed.exists():
                 try:
@@ -154,17 +155,20 @@ class x_cls_make_pypi_x(BaseMake):
                 except Exception:
                     return
 
-            # MANIFEST.in: only explicit includes under the package path
-            manifest_lines: list[str] = [
-                f"include {pkg_path.name}/py.typed",
-            ]
+            # Collect explicit ancillary files (no recursion, strip leading slashes)
+            explicit_files: list[str] = []
             for a in ancillary_files or []:
                 try:
                     rel = a.replace("\\", "/").lstrip("/")
                     if (pkg_path / rel).is_file():
-                        manifest_lines.append(f"include {pkg_path.name}/{rel}")
+                        explicit_files.append(rel)
                 except Exception:
                     continue
+
+            # MANIFEST.in: explicit includes only
+            manifest_lines: list[str] = [f"include {pkg_path.name}/py.typed"]
+            for rel in explicit_files:
+                manifest_lines.append(f"include {pkg_path.name}/{rel}")
             man_path = bd / "MANIFEST.in"
             try:
                 man_path.write_text(
@@ -174,7 +178,7 @@ class x_cls_make_pypi_x(BaseMake):
             except Exception:
                 pass
 
-            # pyproject: enable package-data, but no recursive globs
+            # pyproject: include-package-data and explicit package-data (no globs)
             pyproject = bd / "pyproject.toml"
             try:
                 base_pyproject = (
@@ -192,37 +196,48 @@ class x_cls_make_pypi_x(BaseMake):
                     auth_email = self.email or "unknown@example.com"
                     base_pyproject += f'authors = [{{name = "{auth_name}", email = "{auth_email}"}}]\n'
                 if self.dependencies:
-                    deps_serial = ",\n    ".join(
-                        f'"{d}"' for d in self.dependencies
-                    )
-                    base_pyproject += (
-                        f"dependencies = [\n    {deps_serial}\n]\n"
-                    )
+                    deps_serial = ",\n    ".join(f'"{d}"' for d in self.dependencies)
+                    base_pyproject += f"dependencies = [\n    {deps_serial}\n]\n"
 
+                # Compose explicit package-data list
+                pkg_data_list = ['"py.typed"', *[f'"{rel}"' for rel in explicit_files]]
                 base_pyproject += (
                     "\n[tool.setuptools]\ninclude-package-data = true\n"
                     '\n[tool.setuptools.packages.find]\nwhere = ["."]\n'
                     f'include = ["{pkg_path.name}"]\n'
                     "\n[tool.setuptools.package-data]\n"
-                    f'{pkg_path.name} = ["py.typed"]\n'
+                    f"{pkg_path.name} = [{', '.join(pkg_data_list)}]\n"
                 )
+
                 if not pyproject.exists():
                     pyproject.write_text(base_pyproject, encoding="utf-8")
                 else:
                     txt = pyproject.read_text(encoding="utf-8")
                     changed = False
+                    # ensure include-package-data
                     if "include-package-data" not in txt:
                         if "[tool.setuptools]" in txt:
                             txt += "\ninclude-package-data = true\n"
                         else:
                             txt += "\n[tool.setuptools]\ninclude-package-data = true\n"
                         changed = True
-                    if "[tool.setuptools.package-data]" not in txt:
-                        txt += f'\n[tool.setuptools.package-data]\n{pkg_path.name} = ["py.typed"]\n'
-                        changed = True
+                    # ensure packages.find exists
                     if "[tool.setuptools.packages.find]" not in txt:
                         txt += '\n[tool.setuptools.packages.find]\nwhere = ["."]\n'
                         changed = True
+                    # write/replace package-data block (append a fresh block with explicit entries)
+                    pkg_data_block = (
+                        f'\n[tool.setuptools.package-data]\n'
+                        f"{pkg_path.name} = [{', '.join(pkg_data_list)}]\n"
+                    )
+                    if "[tool.setuptools.package-data]" not in txt:
+                        txt += pkg_data_block
+                        changed = True
+                    else:
+                        # naive replace for the same key (append new explicit block to take precedence)
+                        txt += pkg_data_block
+                        changed = True
+                    # ensure name/version present
                     if "name =" not in txt or "version =" not in txt:
                         txt += "\n" + base_pyproject
                         changed = True
