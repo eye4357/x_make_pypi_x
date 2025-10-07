@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import json
-import os
-import shutil
-import sys
-import urllib.request
-import uuid
-from typing import Any, Iterable
 
 # Inlined minimal helpers from x_make_common_x.helpers
 import logging
-import sys as _sys
+import os
+import shutil
 import subprocess as _subprocess
+import sys
+import sys as _sys
+import urllib.request
+import uuid
+from collections.abc import Iterable
+from typing import Any
 
 _LOGGER = logging.getLogger("x_make")
 _os = os
