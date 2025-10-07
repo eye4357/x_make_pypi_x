@@ -11,69 +11,113 @@ import sys
 import sys as _sys
 import urllib.request
 import uuid
-from collections.abc import Iterable
-from typing import Any
+from collections.abc import Iterable, Mapping
+from contextlib import suppress
+from pathlib import Path
+from typing import IO, TypeVar, cast
 
 _LOGGER = logging.getLogger("x_make")
-_os = os
+_T = TypeVar("_T")
 
 
-def _info(*args: Any) -> None:
+def _info(*args: object) -> None:
     msg = " ".join(str(a) for a in args)
-    try:
+    with suppress(Exception):
         _LOGGER.info("%s", msg)
-    except Exception:
-        pass
+    if not _emit_print(msg):
+        with suppress(Exception):
+            _sys.stdout.write(msg + "\n")
+
+
+def _error(*args: object) -> None:
+    msg = " ".join(str(a) for a in args)
+    with suppress(Exception):
+        _LOGGER.error("%s", msg)
+    if not _emit_error_print(msg):
+        with suppress(Exception):
+            _sys.stderr.write(msg + "\n")
+
+
+def _emit_print(msg: str) -> bool:
     try:
         print(msg)
     except Exception:
-        try:
-            _sys.stdout.write(msg + "\n")
-        except Exception:
-            pass
+        return False
+    return True
 
 
-def _error(*args: Any) -> None:
-    msg = " ".join(str(a) for a in args)
-    try:
-        _LOGGER.error("%s", msg)
-    except Exception:
-        pass
+def _emit_error_print(msg: str) -> bool:
     try:
         print(msg, file=_sys.stderr)
     except Exception:
-        pass
+        return False
+    return True
+
+
+def _ctx_flag(ctx: object | None, attr: str, *, default: bool = False) -> bool:
+    """Best-effort bool coercion for optional orchestrator contexts."""
+
+    if ctx is None:
+        return default
+    try:
+        value = cast("object", getattr(ctx, attr))
+    except AttributeError:
+        return default
+    except Exception:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return bool(value)
 
 
 class BaseMake:
     TOKEN_ENV_VAR: str = "GITHUB_TOKEN"
 
     @classmethod
-    def get_env(cls, name: str, default: Any = None) -> Any:
-        return _os.environ.get(name, default)
+    def get_env(cls, name: str, default: _T | None = None) -> str | _T | None:
+        value = os.environ.get(name)
+        if value is None:
+            return default
+        return value
 
     @classmethod
     def get_env_bool(cls, name: str, default: bool = False) -> bool:
-        v = _os.environ.get(name, None)
+        v = os.environ.get(name, None)
         if v is None:
             return default
         return str(v).lower() in ("1", "true", "yes")
 
     def get_token(self) -> str | None:
-        return _os.environ.get(self.TOKEN_ENV_VAR)
+        return os.environ.get(self.TOKEN_ENV_VAR)
 
     def run_cmd(
-        self, args: Iterable[str], **kwargs: Any
+        self,
+        args: Iterable[str],
+        *,
+        check: bool = False,
+        cwd: str | None = None,
+        timeout: float | None = None,
+        env: Mapping[str, str] | None = None,
     ) -> _subprocess.CompletedProcess[str]:
         return _subprocess.run(
-            list(args), check=False, capture_output=True, text=True, **kwargs
+            list(args),
+            check=check,
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+            timeout=timeout,
+            env=env,
         )
 
 
 """Twine-backed PyPI publisher implementation (installed shim)."""
 
 
-class x_cls_make_pypi_x(BaseMake):
+class XClsMakePypiX(BaseMake):
     # Configurable endpoints and env names
     PYPI_INDEX_URL: str = "https://pypi.org"
     TEST_PYPI_URL: str = "https://test.pypi.org"
@@ -83,14 +127,24 @@ class x_cls_make_pypi_x(BaseMake):
         """Check if the current package name and version already exist on PyPI."""
         try:
             url = f"{self.PYPI_INDEX_URL}/pypi/{self.name}/json"
-            with urllib.request.urlopen(url, timeout=10) as response:
-                data = json.load(response)
-            return self.version in data.get("releases", {})
-        except Exception as e:
+            with cast("IO[bytes]", urllib.request.urlopen(url, timeout=10)) as response:
+                response_bytes = response.read()
+            payload_text = response_bytes.decode("utf-8")
+            payload_raw: object = json.loads(payload_text)
+        except Exception as exc:
             _info(
-                f"WARNING: Could not check PyPI for {self.name}=={self.version}: {e}"
+                "WARNING:",
+                f"Could not check PyPI for {self.name}=={self.version}:",
+                exc,
             )
             return False
+        if not isinstance(payload_raw, dict):
+            return False
+        payload = cast("dict[str, object]", payload_raw)
+        releases_raw = payload.get("releases")
+        if isinstance(releases_raw, dict):
+            return self.version in releases_raw
+        return False
 
     def __init__(
         self,
@@ -102,7 +156,7 @@ class x_cls_make_pypi_x(BaseMake):
         license_text: str,
         dependencies: list[str],
         ctx: object | None = None,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> None:
         # accept optional orchestrator context (backwards compatible)
         self._ctx = ctx
@@ -115,18 +169,16 @@ class x_cls_make_pypi_x(BaseMake):
         self.description = description
         self.license_text = license_text
         self.dependencies = dependencies
+        self._project_dir: Path | None = None
 
         # Prefer ctx-provided dry_run when available (tests expect this)
-        try:
-            self.dry_run = bool(getattr(self._ctx, "dry_run", False))
-        except Exception:
-            self.dry_run = False
+        self.dry_run = _ctx_flag(self._ctx, "dry_run", default=False)
 
-        self._extra = kwargs or {}
+        self._extra: dict[str, object] = dict(kwargs)
         self.debug = bool(self._extra.get("debug", False))
 
         # Print preparation message when verbose is requested (or always is OK)
-        if getattr(self._ctx, "verbose", False):
+        if _ctx_flag(self._ctx, "verbose", default=False):
             _info(f"[pypi] prepared publisher for {self.name}=={self.version}")
 
     def update_pyproject_toml(self, project_dir: str) -> None:
@@ -172,8 +224,14 @@ class x_cls_make_pypi_x(BaseMake):
                 manifest_lines.append(f"include {pkg_path.name}/{rel}")
             man_path = bd / "MANIFEST.in"
             try:
+                seen: set[str] = set()
+                manifest_unique: list[str] = []
+                for line in manifest_lines:
+                    if line not in seen:
+                        seen.add(line)
+                        manifest_unique.append(line)
                 man_path.write_text(
-                    "\n".join(dict.fromkeys(manifest_lines)) + "\n",
+                    "\n".join(manifest_unique) + "\n",
                     encoding="utf-8",
                 )
             except Exception:
@@ -197,12 +255,8 @@ class x_cls_make_pypi_x(BaseMake):
                     auth_email = self.email or "unknown@example.com"
                     base_pyproject += f'authors = [{{name = "{auth_name}", email = "{auth_email}"}}]\n'
                 if self.dependencies:
-                    deps_serial = ",\n    ".join(
-                        f'"{d}"' for d in self.dependencies
-                    )
-                    base_pyproject += (
-                        f"dependencies = [\n    {deps_serial}\n]\n"
-                    )
+                    deps_serial = ",\n    ".join(f'"{d}"' for d in self.dependencies)
+                    base_pyproject += f"dependencies = [\n    {deps_serial}\n]\n"
 
                 # Compose explicit package-data list
                 pkg_data_list = [
@@ -262,50 +316,40 @@ class x_cls_make_pypi_x(BaseMake):
         copy files.
         """
         package_name = self.name
-        repo_build_root = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "_build_temp_x_pypi_x")
-        )
-        os.makedirs(repo_build_root, exist_ok=True)
-        build_dir = os.path.join(
-            repo_build_root, f"_build_{package_name}_{uuid.uuid4().hex}"
-        )
-        os.makedirs(build_dir, exist_ok=True)
-        package_dir = os.path.join(build_dir, package_name)
-        if os.path.lexists(package_dir):
-            if os.path.isdir(package_dir):
+        repo_build_root = Path(__file__).resolve().parent / "_build_temp_x_pypi_x"
+        repo_build_root.mkdir(parents=True, exist_ok=True)
+        build_dir = repo_build_root / f"_build_{package_name}_{uuid.uuid4().hex}"
+        build_dir.mkdir(parents=True, exist_ok=True)
+        package_dir = build_dir / package_name
+        if package_dir.exists():
+            if package_dir.is_dir():
                 shutil.rmtree(package_dir)
             else:
-                os.remove(package_dir)
-        os.makedirs(package_dir, exist_ok=True)
+                package_dir.unlink()
+        package_dir.mkdir(parents=True, exist_ok=True)
 
-        shutil.copy2(
-            main_file, os.path.join(package_dir, os.path.basename(main_file))
-        )
-        init_path = os.path.join(package_dir, "__init__.py")
-        if not os.path.exists(init_path):
-            with open(init_path, "w", encoding="utf-8") as f:
-                f.write("# Package init\n")
+        main_path = Path(main_file)
+        shutil.copy2(main_path, package_dir / main_path.name)
+        init_path = package_dir / "__init__.py"
+        if not init_path.exists():
+            init_path.write_text("# Package init\n", encoding="utf-8")
 
         def _is_allowed(p: str) -> bool:
             """Allow-list files copied into the build."""
             _, ext = os.path.splitext(p.lower())
             allowed = {".py", ".txt", ".md", ".rst"}
-            return (
-                ext in allowed or os.path.basename(p).lower() == "__init__.py"
-            )
+            return ext in allowed or os.path.basename(p).lower() == "__init__.py"
 
         # Copy ancillaries: files only; do not recurse directories
         for entry in ancillary_files or []:
             rel_norm = entry.replace("\\", "/").lstrip("/")
-            src_path = rel_norm.replace("/", os.sep)
-            if os.path.isdir(src_path):
-                _info(
-                    f"Ignoring ancillary directory (no recursion): {rel_norm}"
-                )
+            src_path = Path(entry)
+            if src_path.is_dir():
+                _info(f"Ignoring ancillary directory (no recursion): {rel_norm}")
                 continue
-            if os.path.isfile(src_path) and _is_allowed(src_path):
-                dest_path = os.path.join(package_dir, src_path)
-                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            if src_path.is_file() and _is_allowed(str(src_path)):
+                dest_path = package_dir / rel_norm
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src_path, dest_path)
 
         # Ensure lightweight stub files (.pyi) exist for typing in every
@@ -313,48 +357,51 @@ class x_cls_make_pypi_x(BaseMake):
         # and safe: they do not attempt to reconstruct full signatures, but
         # provide a place-holder so downstream tools won't fail to find stubs.
         try:
-            for root, _dirs, files in os.walk(package_dir):
-                # package-level stub
-                pyi_init = os.path.join(root, "__init__.pyi")
-                if not os.path.exists(pyi_init):
+            for pkg_dir in [package_dir, *package_dir.rglob("*")]:
+                if not pkg_dir.is_dir():
+                    continue
+                pyi_init = pkg_dir / "__init__.pyi"
+                if not pyi_init.exists():
                     try:
-                        with open(pyi_init, "w", encoding="utf-8") as f:
-                            f.write(
-                                f"# Type stubs for package {os.path.basename(root)}\nfrom typing import Any\n\n__all__: list[str]\n"
-                            )
+                        pyi_init.write_text(
+                            (
+                                f"# Type stubs for package {pkg_dir.name}\n"
+                                "from typing import Any\n\n__all__: list[str]\n"
+                            ),
+                            encoding="utf-8",
+                        )
                     except Exception:
                         pass
 
-                # module-level stubs for any .py files
-                for fname in files:
-                    if fname.endswith(".py") and not fname.endswith(".pyi"):
-                        stub_path = os.path.join(root, fname[:-3] + ".pyi")
-                        if not os.path.exists(stub_path):
-                            try:
-                                with open(
-                                    stub_path, "w", encoding="utf-8"
-                                ) as f:
-                                    f.write(
-                                        f"# Stub for {fname}\nfrom typing import Any\n\n"
-                                    )
-                            except Exception:
-                                pass
+            for py_file in package_dir.rglob("*.py"):
+                if py_file.suffix == ".pyi":
+                    continue
+                stub_path = py_file.with_suffix(".pyi")
+                if not stub_path.exists():
+                    try:
+                        stub_path.write_text(
+                            f"# Stub for {py_file.name}\nfrom typing import Any\n\n",
+                            encoding="utf-8",
+                        )
+                    except Exception:
+                        pass
         except Exception:
             # Best-effort: do not fail the build just because stubs couldn't be written.
             pass
 
         # After stubs generated, ensure PEP 561 artifacts & metadata
         try:
-            self.ensure_type_metadata(build_dir, package_dir, ancillary_files)
+            self.ensure_type_metadata(str(build_dir), str(package_dir), ancillary_files)
         except Exception:
             pass
         self._project_dir = build_dir
 
     def prepare(self, main_file: str, ancillary_files: list[str]) -> None:
-        if not os.path.exists(main_file):
+        main_path = Path(main_file)
+        if not main_path.exists():
             raise FileNotFoundError(f"Main file '{main_file}' does not exist.")
         for ancillary_file in ancillary_files or []:
-            if not os.path.exists(ancillary_file):
+            if not Path(ancillary_file).exists():
                 raise FileNotFoundError(
                     f"Ancillary file '{ancillary_file}' is not found."
                 )
@@ -374,92 +421,67 @@ class x_cls_make_pypi_x(BaseMake):
             return True
         self.create_files(main_file, ancillary_files or [])
         project_dir = self._project_dir
-        cwd = os.getcwd()
-        try:
-            os.chdir(project_dir)
+        if project_dir is None:
+            raise RuntimeError("Build directory not prepared; call create_files first")
+        dist_dir = project_dir / "dist"
+        if dist_dir.exists():
+            shutil.rmtree(dist_dir)
 
-            dist_dir = os.path.join(project_dir, "dist")
-            if os.path.exists(dist_dir):
-                shutil.rmtree(dist_dir)
+        build_cmd = [sys.executable, "-m", "build"]
+        _info("Running build:", " ".join(build_cmd))
+        build_result = self.run_cmd(build_cmd, check=False, cwd=str(project_dir))
+        if build_result.stdout:
+            _info(build_result.stdout)
+        if build_result.stderr:
+            _error(build_result.stderr)
+        if build_result.returncode != 0:
+            raise RuntimeError("Build failed. Aborting publish.")
 
-            build_cmd = [sys.executable, "-m", "build"]
-            _info("Running build:", " ".join(build_cmd))
-            rc = os.system(" ".join(build_cmd))
-            if rc != 0:
-                raise RuntimeError("Build failed. Aborting publish.")
+        if not dist_dir.exists():
+            raise RuntimeError("dist/ directory not found after build.")
 
-            if not os.path.exists(dist_dir):
-                raise RuntimeError("dist/ directory not found after build.")
+        files = [
+            path
+            for path in dist_dir.iterdir()
+            if path.name.startswith(f"{self.name}-{self.version}")
+            and (path.suffix == ".whl" or path.name.endswith(".tar.gz"))
+        ]
+        if not files:
+            raise RuntimeError("No valid distribution files found. Aborting publish.")
 
-            files = [
-                os.path.join(dist_dir, f)
-                for f in os.listdir(dist_dir)
-                if f.startswith(f"{self.name}-{self.version}")
-                and f.endswith((".tar.gz", ".whl"))
+        pypirc_path = Path.home() / ".pypirc"
+        has_env_creds = any(
+            [
+                self.get_env("TWINE_USERNAME"),
+                self.get_env("TWINE_PASSWORD"),
+                self.get_env("TWINE_API_TOKEN"),
             ]
-            if not files:
-                raise RuntimeError(
-                    "No valid distribution files found. Aborting publish."
-                )
-
-            pypirc_path = os.path.expanduser("~/.pypirc")
-            has_pypirc = os.path.exists(pypirc_path)
-            has_env_creds = any(
-                [
-                    self.get_env("TWINE_USERNAME"),
-                    self.get_env("TWINE_PASSWORD"),
-                    self.get_env("TWINE_API_TOKEN"),
-                ]
+        )
+        if not pypirc_path.exists() and not has_env_creds:
+            _info(
+                "WARNING: No PyPI credentials found (.pypirc or TWINE env vars)."
+                " Upload will likely fail."
             )
-            if not has_pypirc and not has_env_creds:
-                _info(
-                    "WARNING: No PyPI credentials found (.pypirc or TWINE env vars)."
-                    " Upload will likely fail."
-                )
 
-            # Respect an environment toggle to skip uploading files that already
-            # exist on PyPI. Default to True to avoid failing the overall run when
-            # package files are already present (common in retry scenarios).
-            skip_existing = self.get_env_bool("TWINE_SKIP_EXISTING", True)
-            if skip_existing:
-                twine_cmd = [
-                    sys.executable,
-                    "-m",
-                    "twine",
-                    "upload",
-                    "--skip-existing",
-                    *files,
-                ]
-                _info(
-                    "Running upload (with --skip-existing):",
-                    " ".join(twine_cmd),
-                )
-            else:
-                twine_cmd = [sys.executable, "-m", "twine", "upload", *files]
-                _info("Running upload:", " ".join(twine_cmd))
+        skip_existing = self.get_env_bool("TWINE_SKIP_EXISTING", default=True)
+        base_cmd = [sys.executable, "-m", "twine", "upload"]
+        if skip_existing:
+            base_cmd.append("--skip-existing")
+            _info("Running upload (with --skip-existing):", " ".join(base_cmd))
+        else:
+            _info("Running upload:", " ".join(base_cmd))
+        twine_cmd = [*base_cmd, *(str(path) for path in files)]
 
-            result = _subprocess.run(
-                twine_cmd,
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            if result.stdout:
-                _info(result.stdout)
-            if result.stderr:
-                _error(result.stderr)
-            if result.returncode != 0:
-                raise RuntimeError("Twine upload failed. See output above.")
-            return True
-        finally:
-            try:
-                os.chdir(cwd)
-            except Exception:
-                pass
+        result = self.run_cmd(twine_cmd, check=False, cwd=str(project_dir))
+        if result.stdout:
+            _info(result.stdout)
+        if result.stderr:
+            _error(result.stderr)
+        if result.returncode != 0:
+            raise RuntimeError("Twine upload failed. See output above.")
+        return True
 
-    def prepare_and_publish(
-        self, main_file: str, ancillary_files: list[str]
-    ) -> None:
+    def prepare_and_publish(self, main_file: str, ancillary_files: list[str]) -> None:
         # Always validate inputs (evidence cleanup is enforced unconditionally).
         self.prepare(main_file, ancillary_files or [])
         self.publish(main_file, ancillary_files or [])
@@ -467,3 +489,6 @@ class x_cls_make_pypi_x(BaseMake):
 
 if __name__ == "__main__":
     raise SystemExit("This file is not meant to be run directly.")
+
+
+x_cls_make_pypi_x = XClsMakePypiX
