@@ -11,10 +11,12 @@ import sys
 import sys as _sys
 import urllib.request
 import uuid
-from collections.abc import Iterable, Mapping
 from contextlib import suppress
 from pathlib import Path
-from typing import IO, TypeVar, cast
+from typing import IO, TYPE_CHECKING, TypeVar, cast
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
 
 _LOGGER = logging.getLogger("x_make")
 _T = TypeVar("_T")
