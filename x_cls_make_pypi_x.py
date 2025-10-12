@@ -278,7 +278,10 @@ class XClsMakePypiX(BaseMake):
             deps_serial = ",\n    ".join(f'"{dep}"' for dep in self.dependencies)
             base_pyproject += "dependencies = [\n    " + deps_serial + "\n]\n"
 
-        pkg_data_items = ['"py.typed"', *[f'"{rel}"' for rel in explicit_files]]
+        pkg_data_items = [
+            '"py.typed"',
+            *[f'"{rel}"' for rel in explicit_files],
+        ]
         pkg_block = (
             "\n[tool.setuptools]\ninclude-package-data = true\n"
             '\n[tool.setuptools.packages.find]\nwhere = ["."]\n'
