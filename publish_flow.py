@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 
 from x_make_common_x import HttpClient, HttpError, log_error, log_info
+from x_make_common_x.telemetry import emit_event, make_event
 
 if TYPE_CHECKING:
     from x_0_make_all_x.manifest import ManifestEntry, ManifestOptions
@@ -639,6 +640,9 @@ def wait_for_pypi_release(
     backoff = 1.0
     client = HttpClient(timeout=client_timeout)
 
+    last_heartbeat = time.time()
+    heartbeat_interval = 5.0
+
     try:
         while time.time() < deadline:
             attempt += 1
@@ -651,6 +655,27 @@ def wait_for_pypi_release(
                     attempt_no=attempt,
                 ):
                     return True
+            now = time.time()
+            if now - last_heartbeat >= heartbeat_interval:
+                remaining = max(deadline - now, 0.0)
+                emit_event(
+                    make_event(
+                        source="pypi",
+                        phase="wait_release",
+                        status="retried",
+                        repository=None,
+                        tool="x_make_pypi_x",
+                        attempt=attempt,
+                        duration_ms=None,
+                        details={
+                            "package": name,
+                            "version": version,
+                            "attempt": attempt,
+                            "seconds_remaining": round(remaining, 1),
+                        },
+                    )
+                )
+                last_heartbeat = now
             time.sleep(min(backoff, deadline - time.time()))
             backoff = min(backoff * 2.0, 10.0)
     finally:

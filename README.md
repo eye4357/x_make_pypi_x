@@ -3,7 +3,10 @@
 > "Every release leaves evidence. This rig makes sure the packages we drop on PyPI look clean, typed, and bulletproof."
 
 ## Manifesto
-x_make_pypi_x is the publishing arm of the lab. It snapshots a package module, injects type metadata, builds wheels and source tarballs with `python -m build`, and drives `twine upload` with the right safeguards—`--skip-existing`, credential checks, and output logging. When the orchestrator says ship, this module ensures the drop is staged, sealed, and tracked in the Road to 0.20.1 ledger.
+x_make_pypi_x is the publishing arm of the lab. It snapshots a package module, injects type metadata, builds wheels and source tarballs with `python -m build`, and drives `twine upload` with the right safeguards—`--skip-existing`, credential checks, and output logging. When the orchestrator says ship, this module ensures the drop is staged, sealed, and tracked in the Road to 0.20.2 ledger.
+
+## 0.20.2 Command Sequence
+Version 0.20.2 codifies the publishing playbook I trust. Every instruction below is synchronized with the Road to 0.20.2 checkpoints so the control room can trace each package from source file to PyPI audit log without breaking stride.
 
 ### Highlights
 - Replicates the target module into an isolated build workspace before packaging.
@@ -32,16 +35,16 @@ x_make_pypi_x is the publishing arm of the lab. It snapshots a package module, i
         name="your_package",
         version="0.1.0",
         author="Control Room Ops",
-       email="heisenberg@example.com",
-       description="Blueprint for a PyPI release",
-       license_text="MIT",
-       dependencies=["requests"],
-       ctx=None,
-   )
-   publisher.prepare_and_publish(
-       main_file="src/your_package/__init__.py",
-       ancillary_files=["README.md", "pyproject.toml"],
-   )
+        email="lab.ops@example.com",
+        description="Blueprint for a PyPI release",
+        license_text="MIT",
+        dependencies=["requests"],
+        ctx=None,
+    )
+    publisher.prepare_and_publish(
+        main_file="src/your_package/__init__.py",
+        ancillary_files=["README.md", "pyproject.toml"],
+    )
    ```
 
 ## Quality Assurance
@@ -55,8 +58,8 @@ x_make_pypi_x is the publishing arm of the lab. It snapshots a package module, i
 
 ## Distribution Chain
 - [Changelog](./CHANGELOG.md)
-- [Road to 0.20.1 Control Room Ledger](../x_0_make_all_x/Change%20Control/0.20.1/Road%20to%200.20.1%20Engineering%20Proposal.md)
-- [Road to 0.20.1 Engineering Proposal](../x_0_make_all_x/Change%20Control/0.20.1/Road%20to%200.20.1%20Engineering%20Proposal.md)
+- [Road to 0.20.2 Control Room Ledger](../x_0_make_all_x/Change%20Control/0.20.2/Road%20to%200.20.2%20Engineering%20Proposal.md)
+- [Road to 0.20.2 Engineering Proposal](../x_0_make_all_x/Change%20Control/0.20.2/Road%20to%200.20.2%20Engineering%20Proposal.md)
 
 ## Lab Etiquette
 Stage every publish run in a clean workspace, document the package intent in Change Control, and capture the exact artifact hashes in your release notes. If PyPI declines a drop, fix the evidence trail before you try again.
