@@ -3,10 +3,10 @@
 > "Every release leaves evidence. This rig makes sure the packages we drop on PyPI look clean, typed, and bulletproof."
 
 ## Manifesto
-x_make_pypi_x is the publishing arm of the lab. It snapshots a package module, injects type metadata, builds wheels and source tarballs with `python -m build`, and drives `twine upload` with the right safeguards—`--skip-existing`, credential checks, and output logging. When the orchestrator says ship, this module ensures the drop is staged, sealed, and tracked in the Road to 0.20.2 ledger.
+x_make_pypi_x is the publishing arm of the lab. It snapshots a package module, injects type metadata, builds wheels and source tarballs with `python -m build`, and drives `twine upload` with the right safeguards—`--skip-existing`, credential checks, and output logging. When the orchestrator says ship, this module ensures the drop is staged, sealed, and tracked in the Road to 0.20.3 ledger.
 
-## 0.20.2 Command Sequence
-Version 0.20.2 codifies the publishing playbook I trust. Every instruction below is synchronized with the Road to 0.20.2 checkpoints so the control room can trace each package from source file to PyPI audit log without breaking stride.
+## 0.20.3 Command Sequence
+Version 0.20.3 aligns the publishing pipeline with the JSON-first roadmap. Every artifact we push now records checksum evidence that the new visitor telemetry double-checks before release.
 
 ### Highlights
 - Replicates the target module into an isolated build workspace before packaging.
@@ -58,8 +58,8 @@ Version 0.20.2 codifies the publishing playbook I trust. Every instruction below
 
 ## Distribution Chain
 - [Changelog](./CHANGELOG.md)
-- [Road to 0.20.2 Control Room Ledger](../x_0_make_all_x/Change%20Control/0.20.2/Road%20to%200.20.2%20Engineering%20Proposal.md)
-- [Road to 0.20.2 Engineering Proposal](../x_0_make_all_x/Change%20Control/0.20.2/Road%20to%200.20.2%20Engineering%20Proposal.md)
+- [Road to 0.20.3 Control Room Ledger](../x_0_make_all_x/Change%20Control/0.20.3/Road%20to%200.20.3%20Engineering%20Proposal.md)
+- [Road to 0.20.3 Engineering Proposal](../x_0_make_all_x/Change%20Control/0.20.3/Road%20to%200.20.3%20Engineering%20Proposal.md)
 
 ## Lab Etiquette
 Stage every publish run in a clean workspace, document the package intent in Change Control, and capture the exact artifact hashes in your release notes. If PyPI declines a drop, fix the evidence trail before you try again.

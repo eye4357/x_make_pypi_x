@@ -2,6 +2,10 @@
 
 All notable changes to x_make_pypi_x are documented here. We hew to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning so every PyPI drop has a clean trail.
 
+## [0.20.3] - 2025-10-14
+### Changed
+- README and publishing checklist updated for the Road to 0.20.3 JSON evidence requirements.
+
 ## [0.20.2] - 2025-10-14
 ### Changed
 - Updated publishing documentation for the Road to 0.20.2 release, including refreshed example drivers and control-room guidance.
