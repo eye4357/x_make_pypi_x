@@ -4,15 +4,46 @@ from __future__ import annotations
 import os
 import subprocess
 import time
+import uuid
 from collections.abc import Mapping, Sequence
 from contextlib import chdir, suppress
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from os import PathLike
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 
-from x_make_common_x import HttpClient, HttpError, log_error, log_info
+from x_make_common_x import (
+    HttpClient,
+    HttpError,
+    isoformat_timestamp,
+    log_error,
+    log_info,
+    write_run_report,
+)
 from x_make_common_x.telemetry import emit_event, make_event
+
+PACKAGE_ROOT = Path(__file__).resolve().parent
+
+
+def _json_ready(value: object) -> object:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Mapping):
+        typed_mapping = cast("Mapping[object, object]", value)
+        return {
+            str(key): _json_ready(val)
+            for key, val in typed_mapping.items()
+        }
+    if isinstance(value, Sequence) and not isinstance(
+        value, (str, bytes, bytearray)
+    ):
+        typed_sequence = cast("Sequence[object]", value)
+        return [_json_ready(entry) for entry in typed_sequence]
+    return str(value)
+
 
 if TYPE_CHECKING:
     from x_0_make_all_x.manifest import ManifestEntry, ManifestOptions
@@ -510,7 +541,7 @@ def _check_test_pypi(token_env: str = TEST_PYPI_TOKEN_ENV) -> None:
         raise AssertionError(message) from exc
 
 
-def publish_manifest_entries(  # noqa: PLR0913
+def publish_manifest_entries(  # noqa: PLR0913, PLR0915
     entries: Sequence[ManifestEntry],
     *,
     cloner: object,
@@ -518,53 +549,143 @@ def publish_manifest_entries(  # noqa: PLR0913
     repo_parent_root: str,
     publisher_factory: PublisherFactory,
     token_env: str = TEST_PYPI_TOKEN_ENV,
-) -> tuple[dict[str, str | None], dict[str, dict[str, object]]]:
+) -> tuple[dict[str, str | None], dict[str, dict[str, object]], Path]:
+    start_time = datetime.now(UTC)
+    run_id = uuid.uuid4().hex
     published_versions: dict[str, str | None] = {}
     published_artifacts: dict[str, dict[str, object]] = {}
     fallback_parent = Path(repo_parent_root).resolve()
+    entry_results: list[dict[str, object]] = []
+    status = "running"
+    caught_exc: Exception | None = None
+    report_path: Path | None = None
+
+    manifest_inputs: list[dict[str, object]] = []
+    for entry in entries:
+        manifest_inputs.append(
+            {
+                "package": entry.package,
+                "version": entry.version,
+                "pypi_name": entry.options.pypi_name or entry.package,
+                "ancillary": list(entry.ancillary),
+                "options_kwargs": _json_ready(options_to_kwargs(entry.options)),
+            }
+        )
+    report_payload: dict[str, object] = {
+        "run_id": run_id,
+        "started_at": isoformat_timestamp(start_time),
+        "inputs": {
+            "entry_count": len(entries),
+            "manifest_entries": manifest_inputs,
+            "repo_parent_root": str(repo_parent_root),
+            "token_env": token_env,
+        },
+        "execution": {
+            "publisher_factory": getattr(
+                publisher_factory,
+                "__name__",
+                type(publisher_factory).__name__,
+            ),
+        },
+        "result": {
+            "entries": entry_results,
+            "published_versions": published_versions,
+            "published_artifacts": published_artifacts,
+        },
+    }
 
     _info("Starting the PyPI package publishing process...")
     _check_test_pypi(token_env)
 
-    for entry in entries:
-        repo_name = entry.package
-        version = entry.version
-        anc_names: list[str] = list(entry.ancillary)
-        dist_name = entry.options.pypi_name or repo_name
-        main, anc = _locate_repo_main_and_ancillaries(
-            cloner,
-            repo_name,
-            None,
-            anc_names,
-            fallback_parent=fallback_parent,
-        )
-        extra_kwargs = options_to_kwargs(entry.options)
-        local_kwargs = dict(extra_kwargs)
-        local_kwargs["force_publish"] = True
-        context = _build_publish_context(
-            dist_name,
-            version,
-            main,
-            anc,
-            local_kwargs,
-        )
-        _info(f"Publishing {context.name} version {context.version}")
-        try:
-            published = _execute_publish(context, ctx, publisher_factory)
-        except (RuntimeError, ValueError, subprocess.SubprocessError, OSError) as exc:
-            if _should_skip_publish_exception(exc, context.name, context.version):
-                published = True
-            else:
-                _error(f"Failed to publish {context.name}: {exc}")
-                raise
-        _record_publish_result(
-            context,
-            published=published,
-            published_versions=published_versions,
-            published_artifacts=published_artifacts,
-        )
+    try:
+        for entry in entries:
+            repo_name = entry.package
+            version = entry.version
+            anc_names: list[str] = list(entry.ancillary)
+            dist_name = entry.options.pypi_name or repo_name
+            main, anc = _locate_repo_main_and_ancillaries(
+                cloner,
+                repo_name,
+                None,
+                anc_names,
+                fallback_parent=fallback_parent,
+            )
+            extra_kwargs = options_to_kwargs(entry.options)
+            local_kwargs = dict(extra_kwargs)
+            local_kwargs["force_publish"] = True
+            context = _build_publish_context(
+                dist_name,
+                version,
+                main,
+                anc,
+                local_kwargs,
+            )
+            rel_main = _safe_rel_from_abs(str(context.main_path), str(context.pkg_path))
+            record: dict[str, object] = {
+                "package": repo_name,
+                "distribution": context.name,
+                "version": context.version,
+                "main_file": rel_main or context.main_path.name,
+                "ancillary_publish": list(context.ancillary_rel),
+                "ancillary_manifest": list(anc_names),
+                "package_dir": str(context.pkg_path),
+                "safe_kwargs": _json_ready(context.safe_kwargs),
+                "status": "pending",
+            }
+            entry_results.append(record)
 
-    return published_versions, published_artifacts
+            _info(f"Publishing {context.name} version {context.version}")
+            try:
+                published = _execute_publish(context, ctx, publisher_factory)
+                record["status"] = "published"
+            except (RuntimeError, ValueError, subprocess.SubprocessError, OSError) as exc:
+                if _should_skip_publish_exception(exc, context.name, context.version):
+                    published = True
+                    record["status"] = "skipped_existing"
+                    record["skip_reason"] = _exception_summary(exc)
+                else:
+                    record["status"] = "error"
+                    record["error"] = _exception_summary(exc)
+                    _error(f"Failed to publish {context.name}: {exc}")
+                    raise
+            _record_publish_result(
+                context,
+                published=published,
+                published_versions=published_versions,
+                published_artifacts=published_artifacts,
+            )
+
+        status = "completed"
+        if any(rec.get("status") == "skipped_existing" for rec in entry_results):
+            status = "attention"
+    except Exception as exc:
+        status = "error"
+        caught_exc = exc
+        raise
+    finally:
+        end_time = datetime.now(UTC)
+        report_payload["status"] = status
+        report_payload["completed_at"] = isoformat_timestamp(end_time)
+        report_payload["duration_seconds"] = round(
+            (end_time - start_time).total_seconds(),
+            3,
+        )
+        report_payload["result"] = {
+            "status": status,
+            "entries": [_json_ready(entry) for entry in entry_results],
+            "published_versions": _json_ready(published_versions),
+            "published_artifacts": _json_ready(published_artifacts),
+        }
+        report_path = write_run_report(
+            "x_make_pypi_x",
+            report_payload,
+            base_dir=PACKAGE_ROOT,
+        )
+        if caught_exc is not None:
+            caught_exc.run_report_path = report_path
+
+    assert report_path is not None
+    return published_versions, published_artifacts, report_path
 
 
 def _candidate_release_available(
