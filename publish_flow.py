@@ -26,20 +26,18 @@ from x_make_common_x.telemetry import emit_event, make_event
 PACKAGE_ROOT = Path(__file__).resolve().parent
 
 
-def _json_ready(value: object) -> object:
+JSONValue = str | int | float | bool | None | dict[str, "JSONValue"] | list["JSONValue"]
+
+
+def _json_ready(value: object) -> JSONValue:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, Mapping):
         typed_mapping = cast("Mapping[object, object]", value)
-        return {
-            str(key): _json_ready(val)
-            for key, val in typed_mapping.items()
-        }
-    if isinstance(value, Sequence) and not isinstance(
-        value, (str, bytes, bytearray)
-    ):
+        return {str(key): _json_ready(val) for key, val in typed_mapping.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         typed_sequence = cast("Sequence[object]", value)
         return [_json_ready(entry) for entry in typed_sequence]
     return str(value)
@@ -558,19 +556,29 @@ def publish_manifest_entries(  # noqa: PLR0913, PLR0915
     entry_results: list[dict[str, object]] = []
     status = "running"
     caught_exc: Exception | None = None
-    report_path: Path | None = None
+    report_path: Path
 
-    manifest_inputs: list[dict[str, object]] = []
-    for entry in entries:
-        manifest_inputs.append(
-            {
-                "package": entry.package,
-                "version": entry.version,
-                "pypi_name": entry.options.pypi_name or entry.package,
-                "ancillary": list(entry.ancillary),
-                "options_kwargs": _json_ready(options_to_kwargs(entry.options)),
-            }
-        )
+    manifest_inputs: list[dict[str, object]] = [
+        {
+            "package": entry.package,
+            "version": entry.version,
+            "pypi_name": entry.options.pypi_name or entry.package,
+            "ancillary": list(entry.ancillary),
+            "options_kwargs": cast(
+                "object", _json_ready(options_to_kwargs(entry.options))
+            ),
+        }
+        for entry in entries
+    ]
+    publisher_attr_obj = cast(
+        "object | None", getattr(publisher_factory, "__name__", None)
+    )
+    publisher_identifier = (
+        publisher_attr_obj
+        if isinstance(publisher_attr_obj, str)
+        else type(publisher_factory).__name__
+    )
+
     report_payload: dict[str, object] = {
         "run_id": run_id,
         "started_at": isoformat_timestamp(start_time),
@@ -581,11 +589,7 @@ def publish_manifest_entries(  # noqa: PLR0913, PLR0915
             "token_env": token_env,
         },
         "execution": {
-            "publisher_factory": getattr(
-                publisher_factory,
-                "__name__",
-                type(publisher_factory).__name__,
-            ),
+            "publisher_factory": publisher_identifier,
         },
         "result": {
             "entries": entry_results,
@@ -638,7 +642,12 @@ def publish_manifest_entries(  # noqa: PLR0913, PLR0915
             try:
                 published = _execute_publish(context, ctx, publisher_factory)
                 record["status"] = "published"
-            except (RuntimeError, ValueError, subprocess.SubprocessError, OSError) as exc:
+            except (
+                RuntimeError,
+                ValueError,
+                subprocess.SubprocessError,
+                OSError,
+            ) as exc:
                 if _should_skip_publish_exception(exc, context.name, context.version):
                     published = True
                     record["status"] = "skipped_existing"
@@ -682,9 +691,12 @@ def publish_manifest_entries(  # noqa: PLR0913, PLR0915
             base_dir=PACKAGE_ROOT,
         )
         if caught_exc is not None:
-            caught_exc.run_report_path = report_path
-
-    assert report_path is not None
+            # Allow the orchestrator to discover the report that captured the
+            # failure details without violating strict static analysis.
+            exc_dict_raw = cast("object | None", getattr(caught_exc, "__dict__", None))
+            if isinstance(exc_dict_raw, dict):
+                typed_exc_dict = cast("dict[str, object]", exc_dict_raw)
+                typed_exc_dict["run_report_path"] = report_path
     return published_versions, published_artifacts, report_path
 
 

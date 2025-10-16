@@ -3,10 +3,10 @@
 > "Every release leaves evidence. This rig makes sure the packages we drop on PyPI look clean, typed, and bulletproof."
 
 ## Manifesto
-x_make_pypi_x is the publishing arm of the lab. It snapshots a package module, injects type metadata, builds wheels and source tarballs with `python -m build`, and drives `twine upload` with the right safeguards—`--skip-existing`, credential checks, and output logging. When the orchestrator says ship, this module ensures the drop is staged, sealed, and tracked in the Road to 0.20.3 ledger.
+x_make_pypi_x is the publishing arm of the lab. It snapshots a package module, injects type metadata, builds wheels and source tarballs with `python -m build`, and drives `twine upload` with the right safeguards—`--skip-existing`, credential checks, and output logging. When the orchestrator says ship, this module ensures the drop is staged, sealed, and tracked in the Road to 0.20.4 ledger.
 
-## 0.20.3 Command Sequence
-Version 0.20.3 aligns the publishing pipeline with the JSON-first roadmap. Every artifact we push now records checksum evidence that the new visitor telemetry double-checks before release.
+## 0.20.4 Command Sequence
+Version 0.20.4 pushes publishing telemetry straight into the Release Assembly column. Artifact manifests now land in `make_all_summary.json` with deterministic paths and checksum evidence so the Kanban board shows the exact wheel and sdist that left the lab.
 
 ### Highlights
 - Replicates the target module into an isolated build workspace before packaging.
@@ -58,7 +58,7 @@ Version 0.20.3 aligns the publishing pipeline with the JSON-first roadmap. Every
 
 ## Distribution Chain
 - [Changelog](./CHANGELOG.md)
-- [Road to 0.20.3 Control Room Ledger](../x_0_make_all_x/Change%20Control/0.20.3/Road%20to%200.20.3%20Engineering%20Proposal.md)
+- [Road to 0.20.4 Engineering Proposal](../x_0_make_all_x/Change%20Control/0.20.4/Road%20to%200.20.4%20Engineering%20Proposal.md)
 - [Road to 0.20.3 Engineering Proposal](../x_0_make_all_x/Change%20Control/0.20.3/Road%20to%200.20.3%20Engineering%20Proposal.md)
 
 ## Lab Etiquette

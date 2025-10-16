@@ -2,6 +2,11 @@
 
 All notable changes to x_make_pypi_x are documented here. We hew to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning so every PyPI drop has a clean trail.
 
+## [0.20.4] - 2025-10-15
+### Changed
+- Publishing guidance updated for the Road to 0.20.4 release so artifact manifests flow into `make_all_summary.json` and the Release Assembly Kanban column without manual patchwork.
+- README refreshed to underline the checksum evidence requirements now enforced by the orchestrator summary.
+
 ## [0.20.3] - 2025-10-14
 ### Changed
 - README and publishing checklist updated for the Road to 0.20.3 JSON evidence requirements.
