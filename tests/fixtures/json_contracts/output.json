@@ -1,0 +1,74 @@
+{
+  "run_id": "1234567890abcdef1234567890abcdef",
+  "started_at": "2025-10-18T00:15:00Z",
+  "inputs": {
+    "entry_count": 1,
+    "manifest_entries": [
+      {
+        "package": "x_make_demo_x",
+        "version": "1.0.0",
+        "pypi_name": "x_demo_package",
+        "ancillary": [
+          "README.md"
+        ],
+        "options_kwargs": {
+          "author": "Demo Author",
+          "email": "demo@example.com",
+          "description": "Demonstration package",
+          "license_text": "MIT",
+          "pypi_name": "x_demo_package",
+          "dependencies": [
+            "requests>=2.0"
+          ],
+          "absolute_path": "c:/repos/x_make_demo_x",
+          "force_publish": true
+        }
+      }
+    ],
+    "repo_parent_root": "C:/x_runner_x",
+    "token_env": "TEST_PYPI_TOKEN"
+  },
+  "execution": {
+    "publisher_factory": "XClsMakePypiX"
+  },
+  "result": {
+    "status": "completed",
+    "entries": [
+      {
+        "package": "x_make_demo_x",
+        "distribution": "x_demo_package",
+        "version": "1.0.0",
+        "main_file": "x_cls_make_demo_x.py",
+        "ancillary_publish": [
+          "README.md"
+        ],
+        "ancillary_manifest": [
+          "README.md"
+        ],
+        "package_dir": "C:/x_runner_x/x_make_demo_x",
+        "safe_kwargs": {
+          "author": "Demo Author",
+          "description": "Demonstration package",
+          "force_publish": true
+        },
+        "status": "published"
+      }
+    ],
+    "published_versions": {
+      "x_demo_package": "1.0.0"
+    },
+    "published_artifacts": {
+      "x_demo_package": {
+        "main": "x_cls_make_demo_x.py",
+        "anc": [
+          "README.md"
+        ]
+      }
+    }
+  },
+  "status": "completed",
+  "completed_at": "2025-10-18T00:15:05Z",
+  "duration_seconds": 5.123,
+  "tool": "x_make_pypi_x",
+  "generated_at": "2025-10-18T00:15:05Z"
+}

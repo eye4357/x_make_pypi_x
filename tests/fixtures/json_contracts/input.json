@@ -1,0 +1,38 @@
+{
+  "command": "x_make_pypi_x",
+  "parameters": {
+    "entries": [
+      {
+        "package": "x_make_demo_x",
+        "version": "1.0.0",
+        "ancillary": [
+          "README.md",
+          "docs/guide.md"
+        ],
+        "options": {
+          "author": "Demo Author",
+          "email": "demo@example.com",
+          "description": "Demonstration package",
+          "license_text": "MIT",
+          "dependencies": [
+            "requests>=2.0"
+          ],
+          "pypi_name": "x_demo_package",
+          "ancillary_allowlist": [
+            "docs/**"
+          ],
+          "extra": {
+            "absolute_path": "C:/repos/x_make_demo_x"
+          }
+        }
+      }
+    ],
+    "repo_parent_root": "C:/x_runner_x",
+    "token_env": "TEST_PYPI_TOKEN",
+    "context": {
+      "dry_run": false,
+      "verbose": true
+    },
+    "publisher_factory": "XClsMakePypiX"
+  }
+}

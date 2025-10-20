@@ -1,0 +1,8 @@
+{
+  "status": "failure",
+  "message": "Failed to publish packages",
+  "details": {
+    "package": "x_make_demo_x",
+    "reason": "authentication error"
+  }
+}

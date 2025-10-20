@@ -1,6 +1,6 @@
-# Changelog — Control Room Production Log
+# x_make_pypi_x — Production Ledger
 
-All notable changes to x_make_pypi_x are documented here. We hew to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning so every PyPI drop has a clean trail.
+I capture every significant change to this release foundry here. Entries follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning so each published artefact maps cleanly to its originating code.
 
 ## [0.20.4] - 2025-10-15
 ### Changed

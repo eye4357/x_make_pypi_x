@@ -21,7 +21,6 @@ from x_make_common_x import (
     log_info,
     write_run_report,
 )
-from x_make_common_x.telemetry import emit_event, make_event
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 
@@ -791,22 +790,12 @@ def wait_for_pypi_release(
             now = time.time()
             if now - last_heartbeat >= heartbeat_interval:
                 remaining = max(deadline - now, 0.0)
-                emit_event(
-                    make_event(
-                        source="pypi",
-                        phase="wait_release",
-                        status="retried",
-                        repository=None,
-                        tool="x_make_pypi_x",
-                        attempt=attempt,
-                        duration_ms=None,
-                        details={
-                            "package": name,
-                            "version": version,
-                            "attempt": attempt,
-                            "seconds_remaining": round(remaining, 1),
-                        },
-                    )
+                _info(
+                    "PyPI release heartbeat",
+                    f"package={name}",
+                    f"version={version}",
+                    f"attempt={attempt}",
+                    f"seconds_remaining={round(remaining, 1)}",
                 )
                 last_heartbeat = now
             time.sleep(min(backoff, deadline - time.time()))

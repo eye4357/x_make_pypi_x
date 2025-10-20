@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import argparse
+import importlib
 import json
 
 # Inlined minimal helpers from x_make_common_x.helpers
@@ -11,14 +13,23 @@ import sys
 import sys as _sys
 import urllib.request
 import uuid
+from collections.abc import Mapping, Sequence
 from contextlib import contextmanager, suppress
 from pathlib import Path
+from types import MappingProxyType, SimpleNamespace
 from typing import IO, TYPE_CHECKING, TypeVar, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Mapping
+    from collections.abc import Iterable, Iterator
+
+from jsonschema import ValidationError  # type: ignore[import-untyped]
+from x_0_make_all_x.manifest import ManifestEntry, ManifestOptions
+from x_make_common_x.json_contracts import validate_payload
+
+from x_make_pypi_x.json_contracts import ERROR_SCHEMA, INPUT_SCHEMA, OUTPUT_SCHEMA
+from x_make_pypi_x.publish_flow import PublisherFactory, publish_manifest_entries
 
 _LOGGER = logging.getLogger("x_make")
 _T = TypeVar("_T")
@@ -510,9 +521,244 @@ class XClsMakePypiX(BaseMake):
         self.publish(main_file, ancillary_files or [])
 
 
-if __name__ == "__main__":
-    message = "This file is not meant to be run directly."
-    raise SystemExit(message)
+def _failure_payload(message: str, *, details: Mapping[str, object] | None = None) -> dict[str, object]:
+    payload: dict[str, object] = {"status": "failure", "message": message}
+    if details:
+        payload["details"] = {str(key): value for key, value in details.items()}
+    try:
+        validate_payload(payload, ERROR_SCHEMA)
+    except ValidationError:
+        pass
+    return payload
+
+
+def _normalize_string(value: object) -> str | None:
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    return None
+
+
+def _normalize_string_list(values: object) -> tuple[str, ...]:
+    if isinstance(values, Sequence) and not isinstance(values, (str, bytes, bytearray)):
+        collected: list[str] = []
+        for item in values:
+            if isinstance(item, str):
+                text = item.strip()
+                if text:
+                    collected.append(text)
+        return tuple(collected)
+    return ()
+
+
+def _mapping_from_object(raw: object) -> dict[str, object]:
+    if isinstance(raw, Mapping):
+        return {str(key): value for key, value in raw.items()}
+    return {}
+
+
+def _options_from_json(raw: Mapping[str, object] | None) -> ManifestOptions:
+    if raw is None:
+        return ManifestOptions()
+    dependencies = _normalize_string_list(raw.get("dependencies"))
+    allowlist = _normalize_string_list(raw.get("ancillary_allowlist"))
+    ancillary_list = _normalize_string_list(raw.get("ancillary_list"))
+    extra_dict = _mapping_from_object(raw.get("extra"))
+    extra_proxy = MappingProxyType(dict(extra_dict)) if extra_dict else MappingProxyType({})
+    return ManifestOptions(
+        author=_normalize_string(raw.get("author")),
+        email=_normalize_string(raw.get("email")),
+        description=_normalize_string(raw.get("description")),
+        license_text=_normalize_string(raw.get("license_text")),
+        dependencies=dependencies,
+        pypi_name=_normalize_string(raw.get("pypi_name")),
+        ancillary_allowlist=allowlist,
+        ancillary_list=ancillary_list,
+        extra=extra_proxy,
+    )
+
+
+def _entry_from_json(entry: Mapping[str, object]) -> ManifestEntry:
+    options_raw = entry.get("options")
+    options = _options_from_json(cast("Mapping[str, object] | None", options_raw if isinstance(options_raw, Mapping) else None))
+    ancillary = _normalize_string_list(entry.get("ancillary"))
+    package = _normalize_string(entry.get("package"))
+    version = _normalize_string(entry.get("version"))
+    assert package and version  # schema validation guarantees presence
+    return ManifestEntry(
+        package=package,
+        version=version,
+        ancillary=ancillary,
+        options=options,
+    )
+
+
+def _resolve_publisher_factory(identifier: str | None) -> PublisherFactory:
+    default_factory = cast("PublisherFactory", XClsMakePypiX)
+    if identifier is None:
+        return default_factory
+    cleaned = identifier.strip()
+    if not cleaned:
+        return default_factory
+    if cleaned in {"XClsMakePypiX", "x_cls_make_pypi_x"}:
+        return default_factory
+    module_name: str
+    attr_name: str
+    if ":" in cleaned:
+        module_name, attr_name = cleaned.split(":", 1)
+    elif "." in cleaned:
+        module_name, attr_name = cleaned.rsplit(".", 1)
+    else:
+        module_name, attr_name = "x_make_pypi_x.x_cls_make_pypi_x", cleaned
+    module = importlib.import_module(module_name)
+    candidate = getattr(module, attr_name)
+    if not callable(candidate):
+        message = f"publisher_factory '{identifier}' did not resolve to a callable"
+        raise TypeError(message)
+    return cast("PublisherFactory", candidate)
+
+
+def _build_context(ctx: object | None, overrides: Mapping[str, object] | None) -> object | None:
+    if not overrides:
+        return ctx
+    namespace = SimpleNamespace(**{str(key): value for key, value in overrides.items()})
+    if ctx is not None:
+        namespace._parent_ctx = ctx
+    return namespace
+
+
+def main_json(payload: Mapping[str, object], *, ctx: object | None = None) -> dict[str, object]:
+    try:
+        validate_payload(payload, INPUT_SCHEMA)
+    except ValidationError as exc:
+        return _failure_payload(
+            "input payload failed validation",
+            details={
+                "error": exc.message,
+                "path": [str(part) for part in exc.path],
+                "schema_path": [str(part) for part in exc.schema_path],
+            },
+        )
+
+    parameters_obj = payload.get("parameters", {})
+    parameters = cast("Mapping[str, object]", parameters_obj)
+
+    entries_raw = cast("Sequence[object]", parameters.get("entries", ()))
+    manifest_entries: list[ManifestEntry] = []
+    for entry_obj in entries_raw:
+        if isinstance(entry_obj, Mapping):
+            manifest_entries.append(_entry_from_json(entry_obj))
+
+    repo_root_obj = parameters.get("repo_parent_root")
+    repo_root = str(repo_root_obj)
+
+    token_env_obj = parameters.get("token_env")
+    token_env = (
+        token_env_obj.strip()
+        if isinstance(token_env_obj, str) and token_env_obj.strip()
+        else XClsMakePypiX.TEST_PYPI_TOKEN_ENV
+    )
+
+    publisher_factory_obj = parameters.get("publisher_factory")
+    publisher_identifier = (
+        publisher_factory_obj if isinstance(publisher_factory_obj, str) else None
+    )
+    try:
+        publisher_factory = _resolve_publisher_factory(publisher_identifier)
+    except Exception as exc:  # noqa: BLE001
+        return _failure_payload(
+            "failed to resolve publisher factory",
+            details={"error": str(exc)},
+        )
+
+    context_overrides = parameters.get("context")
+    overrides_mapping = (
+        cast("Mapping[str, object]", context_overrides)
+        if isinstance(context_overrides, Mapping)
+        else None
+    )
+    runtime_ctx = _build_context(ctx, overrides_mapping)
+
+    cloner = SimpleNamespace(target_dir=repo_root)
+
+    try:
+        _, _, report_path = publish_manifest_entries(
+            tuple(manifest_entries),
+            cloner=cloner,
+            ctx=runtime_ctx,
+            repo_parent_root=repo_root,
+            publisher_factory=publisher_factory,
+            token_env=token_env,
+        )
+    except Exception as exc:  # noqa: BLE001
+        details: dict[str, object] = {"error": str(exc)}
+        report_path_obj = getattr(exc, "run_report_path", None)
+        if isinstance(report_path_obj, Path):
+            details["run_report_path"] = str(report_path_obj)
+        return _failure_payload("publishing manifest entries failed", details=details)
+
+    try:
+        report_text = Path(report_path).read_text(encoding="utf-8")
+        result_payload_obj = json.loads(report_text)
+    except (OSError, json.JSONDecodeError) as exc:
+        return _failure_payload(
+            "failed to read run report",
+            details={
+                "error": str(exc),
+                "report_path": str(report_path),
+            },
+        )
+
+    if not isinstance(result_payload_obj, Mapping):
+        return _failure_payload(
+            "run report did not contain a JSON object",
+            details={"report_path": str(report_path)},
+        )
+
+    result_payload = {str(key): value for key, value in result_payload_obj.items()}
+    result_payload.setdefault("errors", [])
+
+    outputs = cast("dict[str, object]", result_payload)
+    try:
+        validate_payload(outputs, OUTPUT_SCHEMA)
+    except ValidationError as exc:
+        return _failure_payload(
+            "generated output failed schema validation",
+            details={
+                "error": exc.message,
+                "path": [str(part) for part in exc.path],
+                "schema_path": [str(part) for part in exc.schema_path],
+            },
+        )
+    return outputs
+
+
+def _load_json_payload(file_path: str | None) -> Mapping[str, object]:
+    if file_path:
+        with Path(file_path).open("r", encoding="utf-8") as handle:
+            return cast("Mapping[str, object]", json.load(handle))
+    return cast("Mapping[str, object]", json.load(sys.stdin))
+
+
+def _run_json_cli(args: Sequence[str]) -> None:
+    parser = argparse.ArgumentParser(description="x_make_pypi_x JSON runner")
+    parser.add_argument("--json", action="store_true", help="Read JSON payload from stdin")
+    parser.add_argument("--json-file", type=str, help="Path to JSON payload file")
+    parsed = parser.parse_args(args)
+
+    if not (parsed.json or parsed.json_file):
+        parser.error("JSON input required. Use --json for stdin or --json-file <path>.")
+
+    payload = _load_json_payload(parsed.json_file if parsed.json_file else None)
+    result = main_json(payload)
+    json.dump(result, sys.stdout, indent=2)
+    sys.stdout.write("\n")
 
 
 x_cls_make_pypi_x = XClsMakePypiX
+
+__all__ = ["XClsMakePypiX", "main_json", "x_cls_make_pypi_x"]
+
+
+if __name__ == "__main__":
+    _run_json_cli(sys.argv[1:])
