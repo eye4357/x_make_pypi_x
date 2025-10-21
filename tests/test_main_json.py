@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import sys
 from collections.abc import Mapping, Sequence
 from datetime import datetime
@@ -12,6 +13,7 @@ from typing import Any, cast
 import pytest
 from x_make_common_x.json_contracts import validate_payload
 
+from x_make_pypi_x import publish_flow
 from x_make_pypi_x.json_contracts import ERROR_SCHEMA, OUTPUT_SCHEMA
 from x_make_pypi_x.x_cls_make_pypi_x import main_json
 
@@ -83,7 +85,7 @@ def _install_fake_publisher(monkeypatch: pytest.MonkeyPatch, module_name: str) -
             self.ancillary = ancillary_rel_paths
             return True
 
-    fake_module.FakePublisher = FakePublisher
+    fake_module.FakePublisher = FakePublisher  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, module_name, fake_module)
 
 
@@ -169,7 +171,7 @@ def test_main_json_publish_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     def failing_publish(*_: Any, **__: Any) -> tuple[dict[str, str | None], dict[str, dict[str, object]], Path]:
         report_path = tmp_path / "reports" / "failed.json"
         exc = RuntimeError("publish boom")
-        exc.run_report_path = report_path
+        exc.run_report_path = report_path  # type: ignore[attr-defined]
         raise exc
 
     monkeypatch.setattr(pypi_module, "publish_manifest_entries", failing_publish)
@@ -190,3 +192,32 @@ def test_main_json_rejects_invalid_payload() -> None:
     status_value = result.get("status")
     assert isinstance(status_value, str)
     assert status_value == "failure"
+
+
+def test_prime_twine_credentials_sets_username_and_password(monkeypatch: pytest.MonkeyPatch) -> None:
+    token_value = "pypi-AgENdGVzdC10b2tlbg"
+    monkeypatch.delenv("TWINE_API_TOKEN", raising=False)
+    monkeypatch.delenv("TWINE_USERNAME", raising=False)
+    monkeypatch.delenv("TWINE_PASSWORD", raising=False)
+    custom_env = "CUSTOM_TOKEN_ENV"
+    monkeypatch.setenv(custom_env, token_value)
+
+    selected = publish_flow._prime_twine_credentials(custom_env)
+
+    assert selected == custom_env
+    assert os.environ["TWINE_API_TOKEN"] == token_value
+    assert os.environ["TWINE_USERNAME"] == "__token__"
+    assert os.environ["TWINE_PASSWORD"] == token_value
+
+
+def test_prime_twine_credentials_preserves_existing_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TWINE_API_TOKEN", "existing")
+    monkeypatch.setenv("TWINE_USERNAME", "custom-user")
+    monkeypatch.setenv("TWINE_PASSWORD", "custom-pass")
+
+    selected = publish_flow._prime_twine_credentials("")
+
+    assert selected == "TWINE_API_TOKEN"
+    assert os.environ["TWINE_API_TOKEN"] == "existing"
+    assert os.environ["TWINE_USERNAME"] == "__token__"
+    assert os.environ["TWINE_PASSWORD"] == "existing"

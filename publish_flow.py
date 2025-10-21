@@ -42,6 +42,104 @@ def _json_ready(value: object) -> JSONValue:
     return str(value)
 
 
+def _read_user_env_var(name: str) -> str | None:
+    if not name:
+        return None
+    current = os.environ.get(name)
+    if isinstance(current, str) and current:
+        return current
+    if os.name != "nt":
+        return None
+    try:
+        import winreg  # type: ignore[import-not-found]
+    except ModuleNotFoundError:
+        return None
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            raw_value, value_type = winreg.QueryValueEx(key, name)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return None
+
+    value: str
+    if isinstance(raw_value, bytes):
+        try:
+            decoded = raw_value.decode("utf-16le").rstrip("\x00")
+        except UnicodeDecodeError:
+            decoded = raw_value.decode(errors="ignore")
+        value = decoded
+    elif isinstance(raw_value, str):
+        value = raw_value
+    else:
+        value = str(raw_value)
+
+    if value_type == getattr(winreg, "REG_EXPAND_SZ", object()):
+        value = os.path.expandvars(value)
+
+    return value.strip() or None
+
+
+def _prime_twine_credentials(token_env: str) -> str | None:
+    token_sources: list[str] = []
+    if token_env:
+        token_sources.append(token_env)
+    token_sources.extend(
+        [
+            "TWINE_API_TOKEN",
+            "PYPI_API_TOKEN",
+            "PYPI_TOKEN",
+            "TESTPYPI_API_TOKEN",
+            "TEST_PYPI_TOKEN",
+        ]
+    )
+
+    selected_source: str | None = None
+    token_value = os.environ.get("TWINE_API_TOKEN", "").strip() or None
+    if token_value:
+        selected_source = "TWINE_API_TOKEN"
+    else:
+        for source in token_sources:
+            candidate = _read_user_env_var(source)
+            if candidate:
+                os.environ["TWINE_API_TOKEN"] = candidate
+                token_value = candidate
+                selected_source = source
+                _info(f"Hydrated Twine API token from {source}.")
+                break
+
+    credential_pairs: tuple[tuple[str, tuple[str, ...]], ...] = (
+        ("TWINE_USERNAME", ("PYPI_USERNAME", "TESTPYPI_USERNAME")),
+        ("TWINE_PASSWORD", ("PYPI_PASSWORD", "TESTPYPI_PASSWORD")),
+    )
+    for target, sources in credential_pairs:
+        target_present = bool(os.environ.get(target, "").strip())
+        if target_present:
+            continue
+        for source in sources:
+            candidate = _read_user_env_var(source)
+            if candidate:
+                os.environ[target] = candidate
+                _info(f"Hydrated {target} from {source}.")
+                break
+
+    if token_value:
+        username_env = "TWINE_USERNAME"
+        password_env = "TWINE_PASSWORD"
+        os.environ[username_env] = "__token__"
+        os.environ[password_env] = token_value
+        _info("Configured Twine token-based username and password.")
+
+    repository_env = "TWINE_REPOSITORY_URL"
+    repo_present = bool(os.environ.get(repository_env, "").strip())
+    if not repo_present and selected_source:
+        if "test" in selected_source.lower():
+            os.environ[repository_env] = "https://test.pypi.org/legacy/"
+            _info("Configured Twine repository for TestPyPI uploads.")
+
+    return selected_source
+
+
 if TYPE_CHECKING:
     from x_0_make_all_x.manifest import ManifestEntry, ManifestOptions
 
@@ -519,7 +617,7 @@ def _record_publish_result(
 
 def _check_test_pypi(token_env: str = TEST_PYPI_TOKEN_ENV) -> None:
     try:
-        token = os.environ.get(token_env)
+        token = _read_user_env_var(token_env)
         url = "https://test.pypi.org/"
         headers = {"Authorization": f"token {token}"} if token else None
         client = HttpClient(timeout=10.0)
@@ -598,6 +696,7 @@ def publish_manifest_entries(  # noqa: PLR0913, PLR0915
     }
 
     _info("Starting the PyPI package publishing process...")
+    selected_token_source = _prime_twine_credentials(token_env)
     _check_test_pypi(token_env)
 
     try:

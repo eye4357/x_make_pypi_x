@@ -497,6 +497,20 @@ class XClsMakePypiX(BaseMake):
             )
 
         skip_existing = self.get_env_bool("TWINE_SKIP_EXISTING", default=True)
+        env_snapshot = {
+            "TWINE_USERNAME": bool(os.environ.get("TWINE_USERNAME")),
+            "TWINE_PASSWORD": bool(os.environ.get("TWINE_PASSWORD")),
+            "TWINE_API_TOKEN": bool(os.environ.get("TWINE_API_TOKEN")),
+        }
+        snapshot_parts = [
+            f"{name}={'set' if present else 'unset'}"
+            for name, present in env_snapshot.items()
+        ]
+        _info(
+            "Twine environment snapshot (pre-upload):",
+            "; ".join(snapshot_parts),
+        )
+        _info("Twine publisher module path:", __file__)
         base_cmd = [sys.executable, "-m", "twine", "upload"]
         if skip_existing:
             base_cmd.append("--skip-existing")
