@@ -696,7 +696,7 @@ def publish_manifest_entries(  # noqa: PLR0913, PLR0915
     }
 
     _info("Starting the PyPI package publishing process...")
-    selected_token_source = _prime_twine_credentials(token_env)
+    _prime_twine_credentials(token_env)
     _check_test_pypi(token_env)
 
     try:
