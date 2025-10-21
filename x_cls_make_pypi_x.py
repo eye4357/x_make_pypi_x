@@ -535,7 +535,9 @@ class XClsMakePypiX(BaseMake):
         self.publish(main_file, ancillary_files or [])
 
 
-def _failure_payload(message: str, *, details: Mapping[str, object] | None = None) -> dict[str, object]:
+def _failure_payload(
+    message: str, *, details: Mapping[str, object] | None = None
+) -> dict[str, object]:
     payload: dict[str, object] = {"status": "failure", "message": message}
     if details:
         payload["details"] = {str(key): value for key, value in details.items()}
@@ -578,7 +580,9 @@ def _options_from_json(raw: Mapping[str, object] | None) -> ManifestOptions:
     allowlist = _normalize_string_list(raw.get("ancillary_allowlist"))
     ancillary_list = _normalize_string_list(raw.get("ancillary_list"))
     extra_dict = _mapping_from_object(raw.get("extra"))
-    extra_proxy = MappingProxyType(dict(extra_dict)) if extra_dict else MappingProxyType({})
+    extra_proxy = (
+        MappingProxyType(dict(extra_dict)) if extra_dict else MappingProxyType({})
+    )
     return ManifestOptions(
         author=_normalize_string(raw.get("author")),
         email=_normalize_string(raw.get("email")),
@@ -594,7 +598,12 @@ def _options_from_json(raw: Mapping[str, object] | None) -> ManifestOptions:
 
 def _entry_from_json(entry: Mapping[str, object]) -> ManifestEntry:
     options_raw = entry.get("options")
-    options = _options_from_json(cast("Mapping[str, object] | None", options_raw if isinstance(options_raw, Mapping) else None))
+    options = _options_from_json(
+        cast(
+            "Mapping[str, object] | None",
+            options_raw if isinstance(options_raw, Mapping) else None,
+        )
+    )
     ancillary = _normalize_string_list(entry.get("ancillary"))
     package = _normalize_string(entry.get("package"))
     version = _normalize_string(entry.get("version"))
@@ -632,7 +641,9 @@ def _resolve_publisher_factory(identifier: str | None) -> PublisherFactory:
     return cast("PublisherFactory", candidate)
 
 
-def _build_context(ctx: object | None, overrides: Mapping[str, object] | None) -> object | None:
+def _build_context(
+    ctx: object | None, overrides: Mapping[str, object] | None
+) -> object | None:
     if not overrides:
         return ctx
     namespace = SimpleNamespace(**{str(key): value for key, value in overrides.items()})
@@ -641,7 +652,9 @@ def _build_context(ctx: object | None, overrides: Mapping[str, object] | None) -
     return namespace
 
 
-def main_json(payload: Mapping[str, object], *, ctx: object | None = None) -> dict[str, object]:
+def main_json(
+    payload: Mapping[str, object], *, ctx: object | None = None
+) -> dict[str, object]:
     try:
         validate_payload(payload, INPUT_SCHEMA)
     except ValidationError as exc:
@@ -756,7 +769,9 @@ def _load_json_payload(file_path: str | None) -> Mapping[str, object]:
 
 def _run_json_cli(args: Sequence[str]) -> None:
     parser = argparse.ArgumentParser(description="x_make_pypi_x JSON runner")
-    parser.add_argument("--json", action="store_true", help="Read JSON payload from stdin")
+    parser.add_argument(
+        "--json", action="store_true", help="Read JSON payload from stdin"
+    )
     parser.add_argument("--json-file", type=str, help="Path to JSON payload file")
     parsed = parser.parse_args(args)
 

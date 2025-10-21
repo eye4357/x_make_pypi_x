@@ -167,8 +167,12 @@ def test_main_json_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
     assert status_value == "completed"
 
 
-def test_main_json_publish_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    def failing_publish(*_: Any, **__: Any) -> tuple[dict[str, str | None], dict[str, dict[str, object]], Path]:
+def test_main_json_publish_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def failing_publish(
+        *_: Any, **__: Any
+    ) -> tuple[dict[str, str | None], dict[str, dict[str, object]], Path]:
         report_path = tmp_path / "reports" / "failed.json"
         exc = RuntimeError("publish boom")
         exc.run_report_path = report_path  # type: ignore[attr-defined]
@@ -194,7 +198,9 @@ def test_main_json_rejects_invalid_payload() -> None:
     assert status_value == "failure"
 
 
-def test_prime_twine_credentials_sets_username_and_password(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_prime_twine_credentials_sets_username_and_password(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     token_value = "pypi-AgENdGVzdC10b2tlbg"
     monkeypatch.delenv("TWINE_API_TOKEN", raising=False)
     monkeypatch.delenv("TWINE_USERNAME", raising=False)
@@ -210,7 +216,9 @@ def test_prime_twine_credentials_sets_username_and_password(monkeypatch: pytest.
     assert os.environ["TWINE_PASSWORD"] == token_value
 
 
-def test_prime_twine_credentials_preserves_existing_user(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_prime_twine_credentials_preserves_existing_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("TWINE_API_TOKEN", "existing")
     monkeypatch.setenv("TWINE_USERNAME", "custom-user")
     monkeypatch.setenv("TWINE_PASSWORD", "custom-pass")
