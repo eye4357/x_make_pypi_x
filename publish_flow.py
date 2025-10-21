@@ -11,7 +11,15 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from os import PathLike
 from pathlib import Path
+from types import ModuleType
 from typing import TYPE_CHECKING, Protocol, cast
+
+try:  # pragma: no cover - platform dependent
+    import winreg as _winreg  # type: ignore[import-not-found]
+except ModuleNotFoundError:  # pragma: no cover - non-Windows
+    _winreg = None
+
+winreg: ModuleType | None = _winreg
 
 from x_make_common_x import (
     HttpClient,
@@ -34,11 +42,9 @@ def _json_ready(value: object) -> JSONValue:
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, Mapping):
-        typed_mapping = cast("Mapping[object, object]", value)
-        return {str(key): _json_ready(val) for key, val in typed_mapping.items()}
+        return {str(key): _json_ready(val) for key, val in value.items()}
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        typed_sequence = cast("Sequence[object]", value)
-        return [_json_ready(entry) for entry in typed_sequence]
+        return [_json_ready(entry) for entry in value]
     return str(value)
 
 
@@ -46,38 +52,39 @@ def _read_user_env_var(name: str) -> str | None:
     if not name:
         return None
     current = os.environ.get(name)
-    if isinstance(current, str) and current:
-        return current
+    if isinstance(current, str) and current.strip():
+        return current.strip()
     if os.name != "nt":
         return None
-    try:
-        import winreg  # type: ignore[import-not-found]
-    except ModuleNotFoundError:
+    return _read_windows_user_env(name)
+
+
+def _read_windows_user_env(name: str) -> str | None:
+    if winreg is None:
         return None
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
-            raw_value, value_type = winreg.QueryValueEx(key, name)
-    except FileNotFoundError:
-        return None
-    except OSError:
+            raw_value_obj, value_type = cast(
+                "tuple[object, int]", winreg.QueryValueEx(key, name)
+            )
+    except (FileNotFoundError, OSError):
         return None
 
-    value: str
-    if isinstance(raw_value, bytes):
-        try:
-            decoded = raw_value.decode("utf-16le").rstrip("\x00")
-        except UnicodeDecodeError:
-            decoded = raw_value.decode(errors="ignore")
-        value = decoded
-    elif isinstance(raw_value, str):
-        value = raw_value
-    else:
-        value = str(raw_value)
-
+    value = _decode_winreg_value(raw_value_obj)
     if value_type == getattr(winreg, "REG_EXPAND_SZ", object()):
         value = os.path.expandvars(value)
-
     return value.strip() or None
+
+
+def _decode_winreg_value(raw_value: object) -> str:
+    if isinstance(raw_value, bytes):
+        try:
+            return raw_value.decode("utf-16le").rstrip("\x00")
+        except UnicodeDecodeError:
+            return raw_value.decode(errors="ignore")
+    if isinstance(raw_value, str):
+        return raw_value
+    return str(raw_value)
 
 
 def _prime_twine_credentials(token_env: str) -> str | None:
