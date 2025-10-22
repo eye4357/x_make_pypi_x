@@ -17,9 +17,9 @@ from typing import TYPE_CHECKING, Protocol, cast
 try:  # pragma: no cover - platform dependent
     import winreg as _winreg  # type: ignore[import-not-found]
 except ModuleNotFoundError:  # pragma: no cover - non-Windows
-    _winreg = None
-
-winreg: ModuleType | None = _winreg
+    winreg: ModuleType | None = None
+else:
+    winreg = cast("ModuleType", _winreg)
 
 from x_make_common_x import (
     HttpClient,
