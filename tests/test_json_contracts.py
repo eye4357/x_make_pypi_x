@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TypeVar, cast
 
 import pytest
 from x_make_common_x.json_contracts import validate_payload, validate_schema
@@ -16,34 +17,37 @@ from x_make_pypi_x.json_contracts import (
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "json_contracts"
 REPORTS_DIR = Path(__file__).resolve().parents[1] / "reports"
 
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-else:
-    pytest = cast("Any", pytest)
-
-fixture = cast("Callable[..., Any]", pytest.fixture)
+FixtureFunc = TypeVar("FixtureFunc", bound=Callable[[], dict[str, object]])
 
 
-@fixture(scope="module")
+def _module_fixture(func: FixtureFunc) -> FixtureFunc:
+    decorator: Callable[[FixtureFunc], object] = pytest.fixture(scope="module")
+    return cast("FixtureFunc", decorator(func))
+
+
+def _load_fixture(name: str) -> dict[str, object]:
+    path = FIXTURE_DIR / f"{name}.json"
+    with path.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if not isinstance(payload, dict):
+        message = f"Fixture payload must be an object: {name}"
+        raise TypeError(message)
+    return cast("dict[str, object]", payload)
+
+
+@_module_fixture
 def sample_input() -> dict[str, object]:
-    with (FIXTURE_DIR / "input.json").open("r", encoding="utf-8") as handle:
-        data = json.load(handle)
-    return cast("dict[str, object]", data)
+    return _load_fixture("input")
 
 
-@fixture(scope="module")
+@_module_fixture
 def sample_output() -> dict[str, object]:
-    with (FIXTURE_DIR / "output.json").open("r", encoding="utf-8") as handle:
-        data = json.load(handle)
-    return cast("dict[str, object]", data)
+    return _load_fixture("output")
 
 
-@fixture(scope="module")
+@_module_fixture
 def sample_error() -> dict[str, object]:
-    with (FIXTURE_DIR / "error.json").open("r", encoding="utf-8") as handle:
-        data = json.load(handle)
-    return cast("dict[str, object]", data)
+    return _load_fixture("error")
 
 
 def test_schemas_are_valid() -> None:
@@ -70,4 +74,8 @@ def test_existing_reports_align_with_schema() -> None:
     for report_file in report_files:
         with report_file.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
-        validate_payload(payload, OUTPUT_SCHEMA)
+        if not isinstance(payload, dict):
+            message = f"Report payload must be an object: {report_file}"
+            raise TypeError(message)
+        typed_payload = cast("dict[str, object]", payload)
+        validate_payload(typed_payload, OUTPUT_SCHEMA)

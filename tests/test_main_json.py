@@ -1,33 +1,35 @@
+# ruff: noqa: S101 - assertions express expectations in test cases
 from __future__ import annotations
 
 import importlib
 import json
 import os
 import sys
-from collections.abc import Mapping, Sequence
-from datetime import datetime
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Any, cast
 
 import pytest
 from x_make_common_x.json_contracts import validate_payload
 
 from x_make_pypi_x import publish_flow
 from x_make_pypi_x.json_contracts import ERROR_SCHEMA, OUTPUT_SCHEMA
+from x_make_pypi_x.publish_flow import PublisherFactory
 from x_make_pypi_x.x_cls_make_pypi_x import main_json
 
 pypi_module = importlib.import_module("x_make_pypi_x.x_cls_make_pypi_x")
 
 
 def _iso(dt: datetime) -> str:
-    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
-def _run_report_payload(repo_root: Path) -> dict[str, Any]:
+def _run_report_payload(repo_root: Path) -> dict[str, object]:
     return {
         "run_id": "0123456789abcdef0123456789abcdef",
-        "started_at": _iso(datetime(2025, 1, 1, 12, 0, 0)),
+    "started_at": _iso(datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)),
         "inputs": {
             "entry_count": 1,
             "manifest_entries": [
@@ -64,10 +66,10 @@ def _run_report_payload(repo_root: Path) -> dict[str, Any]:
             },
         },
         "status": "completed",
-        "completed_at": _iso(datetime(2025, 1, 1, 12, 5, 0)),
+    "completed_at": _iso(datetime(2025, 1, 1, 12, 5, 0, tzinfo=UTC)),
         "duration_seconds": 300.0,
         "tool": "x_make_pypi_x",
-        "generated_at": _iso(datetime(2025, 1, 1, 12, 5, 0)),
+    "generated_at": _iso(datetime(2025, 1, 1, 12, 5, 0, tzinfo=UTC)),
         "errors": [],
     }
 
@@ -85,9 +87,8 @@ def _install_fake_publisher(monkeypatch: pytest.MonkeyPatch, module_name: str) -
             self.ancillary = ancillary_rel_paths
             return True
 
-    fake_module.FakePublisher = FakePublisher  # type: ignore[attr-defined]
+    fake_module.FakePublisher = FakePublisher
     monkeypatch.setitem(sys.modules, module_name, fake_module)
-
 
 def _payload(template_repo_root: Path, publisher_identifier: str) -> dict[str, object]:
     return {
@@ -114,26 +115,40 @@ def _payload(template_repo_root: Path, publisher_identifier: str) -> dict[str, o
     }
 
 
+@dataclass
+class _PublishCall:
+    entries: Sequence[object]
+    cloner: object
+    ctx: object | None
+    repo_parent_root: str
+    publisher_factory: PublisherFactory
+    token_env: str
+
+
 def test_main_json_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     module_name = "tests.fake_publisher"
     _install_fake_publisher(monkeypatch, module_name)
 
-    calls: dict[str, Any] = {}
+    captured_call: _PublishCall | None = None
 
     def fake_publish(
-        entries: Sequence[Any],
+        entries: Sequence[object],
         *,
         cloner: object,
         ctx: object | None,
         repo_parent_root: str,
-        publisher_factory: object,
+        publisher_factory: PublisherFactory,
         token_env: str,
     ) -> tuple[dict[str, str | None], dict[str, dict[str, object]], Path]:
-        calls["entries"] = entries
-        calls["ctx"] = ctx
-        calls["repo_parent_root"] = repo_parent_root
-        calls["publisher_factory"] = publisher_factory
-        calls["token_env"] = token_env
+        nonlocal captured_call
+        captured_call = _PublishCall(
+            entries=tuple(entries),
+            cloner=cloner,
+            ctx=ctx,
+            repo_parent_root=repo_parent_root,
+            publisher_factory=publisher_factory,
+            token_env=token_env,
+        )
 
         report_payload = _run_report_payload(tmp_path)
         report_path = tmp_path / "reports" / "x_make_pypi_x_run_test.json"
@@ -152,14 +167,20 @@ def test_main_json_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
 
     validate_payload(result, OUTPUT_SCHEMA)
 
-    entries = cast("Sequence[Any]", calls["entries"])
-    assert entries and entries[0].package == "demo_pkg"
-    ctx = calls["ctx"]
+    assert captured_call is not None
+    entries = list(captured_call.entries)
+    assert entries
+    first_entry = entries[0]
+    package_attr = getattr(first_entry, "package", None)
+    assert isinstance(package_attr, str)
+    assert package_attr == "demo_pkg"
+    ctx = captured_call.ctx
     assert isinstance(ctx, SimpleNamespace)
     assert getattr(ctx, "dry_run", False) is True
-    assert calls["repo_parent_root"] == str(tmp_path)
-    assert calls["token_env"] == "CUSTOM_ENV"
-    publisher_factory_obj = calls.get("publisher_factory")
+    assert isinstance(captured_call.cloner, SimpleNamespace)
+    assert captured_call.repo_parent_root == str(tmp_path)
+    assert captured_call.token_env == "CUSTOM_ENV"
+    publisher_factory_obj: Callable[..., object] = captured_call.publisher_factory
     assert callable(publisher_factory_obj)
     assert getattr(publisher_factory_obj, "__name__", "") == "FakePublisher"
     status_value = result.get("status")
@@ -171,11 +192,11 @@ def test_main_json_publish_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     def failing_publish(
-        *_: Any, **__: Any
+        *_args: object, **_kwargs: object
     ) -> tuple[dict[str, str | None], dict[str, dict[str, object]], Path]:
         report_path = tmp_path / "reports" / "failed.json"
         exc = RuntimeError("publish boom")
-        exc.run_report_path = report_path  # type: ignore[attr-defined]
+        exc.run_report_path = report_path
         raise exc
 
     monkeypatch.setattr(pypi_module, "publish_manifest_entries", failing_publish)
@@ -185,8 +206,8 @@ def test_main_json_publish_failure(
 
     validate_payload(result, ERROR_SCHEMA)
 
-    details_obj = cast("Mapping[str, object] | None", result.get("details"))
-    assert details_obj is not None
+    details_obj = result.get("details")
+    assert isinstance(details_obj, Mapping)
     assert "run_report_path" in details_obj
 
 
@@ -201,7 +222,7 @@ def test_main_json_rejects_invalid_payload() -> None:
 def test_prime_twine_credentials_sets_username_and_password(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    token_value = "pypi-AgENdGVzdC10b2tlbg"
+    token_value = "pypi-AgENdGVzdC10b2tlbg"  # noqa: S105 - test token fixture
     monkeypatch.delenv("TWINE_API_TOKEN", raising=False)
     monkeypatch.delenv("TWINE_USERNAME", raising=False)
     monkeypatch.delenv("TWINE_PASSWORD", raising=False)

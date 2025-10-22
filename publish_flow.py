@@ -15,11 +15,11 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Protocol, cast
 
 try:  # pragma: no cover - platform dependent
-    import winreg as _winreg  # type: ignore[import-not-found]
+    import winreg as _winreg
 except ModuleNotFoundError:  # pragma: no cover - non-Windows
     winreg: ModuleType | None = None
 else:
-    winreg = cast("ModuleType", _winreg)
+    winreg = _winreg
 
 from x_make_common_x import (
     HttpClient,
@@ -64,14 +64,12 @@ def _read_windows_user_env(name: str) -> str | None:
         return None
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
-            raw_value_obj, value_type = cast(
-                "tuple[object, int]", winreg.QueryValueEx(key, name)
-            )
+            raw_value_obj, value_type = winreg.QueryValueEx(key, name)
     except (FileNotFoundError, OSError):
         return None
 
     value = _decode_winreg_value(raw_value_obj)
-    if value_type == getattr(winreg, "REG_EXPAND_SZ", object()):
+    if int(value_type) == getattr(winreg, "REG_EXPAND_SZ", object()):
         value = os.path.expandvars(value)
     return value.strip() or None
 

@@ -15,6 +15,7 @@ import urllib.request
 import uuid
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager, suppress
+from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
 from typing import IO, TYPE_CHECKING, TypeVar, cast
@@ -33,6 +34,9 @@ from x_make_pypi_x.publish_flow import PublisherFactory, publish_manifest_entrie
 
 _LOGGER = logging.getLogger("x_make")
 _T = TypeVar("_T")
+
+ValidationErrorType = cast("type[Exception]", ValidationError)
+_EMPTY_MAPPING: Mapping[str, object] = MappingProxyType({})
 
 
 def _info(*args: object) -> None:
@@ -541,10 +545,8 @@ def _failure_payload(
     payload: dict[str, object] = {"status": "failure", "message": message}
     if details:
         payload["details"] = {str(key): value for key, value in details.items()}
-    try:
+    with suppress(ValidationErrorType):
         validate_payload(payload, ERROR_SCHEMA)
-    except ValidationError:
-        pass
     return payload
 
 
@@ -567,10 +569,10 @@ def _normalize_string_list(values: object) -> tuple[str, ...]:
     return ()
 
 
-def _mapping_from_object(raw: object) -> dict[str, object]:
+def _mapping_from_object(raw: object) -> Mapping[str, object] | None:
     if isinstance(raw, Mapping):
-        return {str(key): value for key, value in raw.items()}
-    return {}
+        return MappingProxyType({str(key): value for key, value in raw.items()})
+    return None
 
 
 def _options_from_json(raw: Mapping[str, object] | None) -> ManifestOptions:
@@ -598,16 +600,16 @@ def _options_from_json(raw: Mapping[str, object] | None) -> ManifestOptions:
 
 def _entry_from_json(entry: Mapping[str, object]) -> ManifestEntry:
     options_raw = entry.get("options")
-    options = _options_from_json(
-        cast(
-            "Mapping[str, object] | None",
-            options_raw if isinstance(options_raw, Mapping) else None,
-        )
+    options_mapping = (
+        _mapping_from_object(options_raw) if isinstance(options_raw, Mapping) else None
     )
+    options = _options_from_json(options_mapping)
     ancillary = _normalize_string_list(entry.get("ancillary"))
     package = _normalize_string(entry.get("package"))
     version = _normalize_string(entry.get("version"))
-    assert package and version  # schema validation guarantees presence
+    if package is None or version is None:
+        message = "manifest entry is missing required fields"
+        raise ValueError(message)
     return ManifestEntry(
         package=package,
         version=version,
@@ -648,13 +650,11 @@ def _build_context(
         return ctx
     namespace = SimpleNamespace(**{str(key): value for key, value in overrides.items()})
     if ctx is not None:
-        namespace._parent_ctx = ctx
+        namespace._parent_ctx = ctx  # noqa: SLF001 - preserve legacy attribute
     return namespace
 
 
-def main_json(
-    payload: Mapping[str, object], *, ctx: object | None = None
-) -> dict[str, object]:
+def _validate_input_schema(payload: Mapping[str, object]) -> dict[str, object] | None:
     try:
         validate_payload(payload, INPUT_SCHEMA)
     except ValidationError as exc:
@@ -666,56 +666,102 @@ def main_json(
                 "schema_path": [str(part) for part in exc.schema_path],
             },
         )
+    return None
 
-    parameters_obj = payload.get("parameters", {})
-    parameters = cast("Mapping[str, object]", parameters_obj)
 
-    entries_raw = cast("Sequence[object]", parameters.get("entries", ()))
+def _parameters_from_payload(payload: Mapping[str, object]) -> Mapping[str, object]:
+    parameters_obj = payload.get("parameters")
+    if isinstance(parameters_obj, Mapping):
+        return MappingProxyType({str(key): value for key, value in parameters_obj.items()})
+    return _EMPTY_MAPPING
+
+
+@dataclass(frozen=True)
+class _InputParameters:
+    entries: tuple[ManifestEntry, ...]
+    repo_root: str
+    token_env: str
+    publisher_identifier: str | None
+    context_overrides: Mapping[str, object] | None
+
+
+def _entries_from_parameters(parameters: Mapping[str, object]) -> tuple[ManifestEntry, ...]:
+    entries_raw = parameters.get("entries")
     manifest_entries: list[ManifestEntry] = []
-    for entry_obj in entries_raw:
-        if isinstance(entry_obj, Mapping):
-            manifest_entries.append(_entry_from_json(entry_obj))
+    if isinstance(entries_raw, Sequence) and not isinstance(
+        entries_raw, (str, bytes, bytearray)
+    ):
+        for entry_obj in entries_raw:
+            if isinstance(entry_obj, Mapping):
+                manifest_entries.append(_entry_from_json(entry_obj))
+    return tuple(manifest_entries)
 
-    repo_root_obj = parameters.get("repo_parent_root")
-    repo_root = str(repo_root_obj)
 
-    token_env_obj = parameters.get("token_env")
-    token_env = (
-        token_env_obj.strip()
-        if isinstance(token_env_obj, str) and token_env_obj.strip()
-        else XClsMakePypiX.TEST_PYPI_TOKEN_ENV
-    )
-
-    publisher_factory_obj = parameters.get("publisher_factory")
-    publisher_identifier = (
-        publisher_factory_obj if isinstance(publisher_factory_obj, str) else None
-    )
+def _extract_inputs(parameters: Mapping[str, object]) -> _InputParameters | dict[str, object]:
     try:
-        publisher_factory = _resolve_publisher_factory(publisher_identifier)
+        manifest_entries = _entries_from_parameters(parameters)
+    except ValueError as exc:
+        return _failure_payload(
+            "failed to parse manifest entries",
+            details={"error": str(exc)},
+        )
+
+    repo_root = _normalize_string(parameters.get("repo_parent_root"))
+    if repo_root is None:
+        return _failure_payload(
+            "repo_parent_root must be a non-empty string",
+            details={"field": "repo_parent_root"},
+        )
+
+    token_env = _normalize_string(parameters.get("token_env"))
+    token_env_effective = token_env or XClsMakePypiX.TEST_PYPI_TOKEN_ENV
+
+    publisher_identifier = _normalize_string(parameters.get("publisher_factory"))
+
+    context_raw = parameters.get("context")
+    context_overrides = _mapping_from_object(context_raw)
+
+    return _InputParameters(
+        entries=manifest_entries,
+        repo_root=repo_root,
+        token_env=token_env_effective,
+        publisher_identifier=publisher_identifier,
+        context_overrides=context_overrides,
+    )
+
+
+def main_json(
+    payload: Mapping[str, object], *, ctx: object | None = None
+) -> dict[str, object]:
+    schema_failure = _validate_input_schema(payload)
+    if schema_failure:
+        return schema_failure
+
+    parameters = _parameters_from_payload(payload)
+    inputs = _extract_inputs(parameters)
+    if isinstance(inputs, dict):
+        return inputs
+
+    try:
+        publisher_factory = _resolve_publisher_factory(inputs.publisher_identifier)
     except Exception as exc:  # noqa: BLE001
         return _failure_payload(
             "failed to resolve publisher factory",
             details={"error": str(exc)},
         )
 
-    context_overrides = parameters.get("context")
-    overrides_mapping = (
-        cast("Mapping[str, object]", context_overrides)
-        if isinstance(context_overrides, Mapping)
-        else None
-    )
-    runtime_ctx = _build_context(ctx, overrides_mapping)
+    runtime_ctx = _build_context(ctx, inputs.context_overrides)
 
-    cloner = SimpleNamespace(target_dir=repo_root)
+    cloner = SimpleNamespace(target_dir=inputs.repo_root)
 
     try:
         _, _, report_path = publish_manifest_entries(
-            tuple(manifest_entries),
+            inputs.entries,
             cloner=cloner,
             ctx=runtime_ctx,
-            repo_parent_root=repo_root,
+            repo_parent_root=inputs.repo_root,
             publisher_factory=publisher_factory,
-            token_env=token_env,
+            token_env=inputs.token_env,
         )
     except Exception as exc:  # noqa: BLE001
         details: dict[str, object] = {"error": str(exc)}
@@ -745,7 +791,7 @@ def main_json(
     result_payload = {str(key): value for key, value in result_payload_obj.items()}
     result_payload.setdefault("errors", [])
 
-    outputs = cast("dict[str, object]", result_payload)
+    outputs: dict[str, object] = dict(result_payload)
     try:
         validate_payload(outputs, OUTPUT_SCHEMA)
     except ValidationError as exc:
@@ -761,10 +807,18 @@ def main_json(
 
 
 def _load_json_payload(file_path: str | None) -> Mapping[str, object]:
+    def _load(stream: IO[str]) -> Mapping[str, object]:
+        payload_obj: object = json.load(stream)
+        if not isinstance(payload_obj, Mapping):
+            message = "JSON payload must be a mapping"
+            raise TypeError(message)
+        typed_payload = {str(key): value for key, value in payload_obj.items()}
+        return MappingProxyType(typed_payload)
+
     if file_path:
         with Path(file_path).open("r", encoding="utf-8") as handle:
-            return cast("Mapping[str, object]", json.load(handle))
-    return cast("Mapping[str, object]", json.load(sys.stdin))
+            return _load(handle)
+    return _load(sys.stdin)
 
 
 def _run_json_cli(args: Sequence[str]) -> None:
