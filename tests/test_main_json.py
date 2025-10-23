@@ -29,7 +29,7 @@ def _iso(dt: datetime) -> str:
 def _run_report_payload(repo_root: Path) -> dict[str, object]:
     return {
         "run_id": "0123456789abcdef0123456789abcdef",
-    "started_at": _iso(datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)),
+        "started_at": _iso(datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)),
         "inputs": {
             "entry_count": 1,
             "manifest_entries": [
@@ -66,10 +66,10 @@ def _run_report_payload(repo_root: Path) -> dict[str, object]:
             },
         },
         "status": "completed",
-    "completed_at": _iso(datetime(2025, 1, 1, 12, 5, 0, tzinfo=UTC)),
+        "completed_at": _iso(datetime(2025, 1, 1, 12, 5, 0, tzinfo=UTC)),
         "duration_seconds": 300.0,
         "tool": "x_make_pypi_x",
-    "generated_at": _iso(datetime(2025, 1, 1, 12, 5, 0, tzinfo=UTC)),
+        "generated_at": _iso(datetime(2025, 1, 1, 12, 5, 0, tzinfo=UTC)),
         "errors": [],
     }
 
@@ -89,6 +89,7 @@ def _install_fake_publisher(monkeypatch: pytest.MonkeyPatch, module_name: str) -
 
     fake_module.FakePublisher = FakePublisher
     monkeypatch.setitem(sys.modules, module_name, fake_module)
+
 
 def _payload(template_repo_root: Path, publisher_identifier: str) -> dict[str, object]:
     return {
@@ -196,7 +197,7 @@ def test_main_json_publish_failure(
     ) -> tuple[dict[str, str | None], dict[str, dict[str, object]], Path]:
         report_path = tmp_path / "reports" / "failed.json"
         exc = RuntimeError("publish boom")
-        exc.run_report_path = report_path
+        exc.__dict__["run_report_path"] = report_path
         raise exc
 
     monkeypatch.setattr(pypi_module, "publish_manifest_entries", failing_publish)
