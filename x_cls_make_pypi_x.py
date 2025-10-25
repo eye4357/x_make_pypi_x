@@ -435,7 +435,7 @@ class XClsMakePypiX(BaseMake):
                 message = f"Ancillary file '{ancillary_file}' is not found."
                 raise FileNotFoundError(message)
 
-    def publish(  # noqa: C901, PLR0912
+    def publish(  # noqa: C901, PLR0912, PLR0915
         self,
         main_file: str,
         ancillary_files: list[str],
@@ -672,7 +672,9 @@ def _validate_input_schema(payload: Mapping[str, object]) -> dict[str, object] |
 def _parameters_from_payload(payload: Mapping[str, object]) -> Mapping[str, object]:
     parameters_obj = payload.get("parameters")
     if isinstance(parameters_obj, Mapping):
-        return MappingProxyType({str(key): value for key, value in parameters_obj.items()})
+        return MappingProxyType(
+            {str(key): value for key, value in parameters_obj.items()}
+        )
     return _EMPTY_MAPPING
 
 
@@ -685,19 +687,25 @@ class _InputParameters:
     context_overrides: Mapping[str, object] | None
 
 
-def _entries_from_parameters(parameters: Mapping[str, object]) -> tuple[ManifestEntry, ...]:
+def _entries_from_parameters(
+    parameters: Mapping[str, object],
+) -> tuple[ManifestEntry, ...]:
     entries_raw = parameters.get("entries")
     manifest_entries: list[ManifestEntry] = []
     if isinstance(entries_raw, Sequence) and not isinstance(
         entries_raw, (str, bytes, bytearray)
     ):
-        for entry_obj in entries_raw:
-            if isinstance(entry_obj, Mapping):
-                manifest_entries.append(_entry_from_json(entry_obj))
+        manifest_entries.extend(
+            _entry_from_json(entry_obj)
+            for entry_obj in entries_raw
+            if isinstance(entry_obj, Mapping)
+        )
     return tuple(manifest_entries)
 
 
-def _extract_inputs(parameters: Mapping[str, object]) -> _InputParameters | dict[str, object]:
+def _extract_inputs(
+    parameters: Mapping[str, object],
+) -> _InputParameters | dict[str, object]:
     try:
         manifest_entries = _entries_from_parameters(parameters)
     except ValueError as exc:
@@ -730,7 +738,7 @@ def _extract_inputs(parameters: Mapping[str, object]) -> _InputParameters | dict
     )
 
 
-def main_json(
+def main_json(  # noqa: PLR0911 - routing handles multiple exit paths explicitly
     payload: Mapping[str, object], *, ctx: object | None = None
 ) -> dict[str, object]:
     schema_failure = _validate_input_schema(payload)

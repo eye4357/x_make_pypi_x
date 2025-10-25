@@ -1,25 +1,75 @@
-# ruff: noqa: S101 - assertions express expectations in test cases
 from __future__ import annotations
 
 import importlib
 import json
 import os
 import sys
-from collections.abc import Callable, Mapping, Sequence
+import uuid
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import TYPE_CHECKING, NoReturn, Protocol, cast
 
-import pytest
 from x_make_common_x.json_contracts import validate_payload
 
 from x_make_pypi_x import publish_flow
 from x_make_pypi_x.json_contracts import ERROR_SCHEMA, OUTPUT_SCHEMA
-from x_make_pypi_x.publish_flow import PublisherFactory
 from x_make_pypi_x.x_cls_make_pypi_x import main_json
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from x_make_pypi_x.publish_flow import PublisherFactory
+else:
+
+    class PublisherFactory(Protocol):
+        def __call__(self, *args: object, **kwargs: object) -> object: ...
+
+
+class SupportsMonkeyPatch(Protocol):
+    def setitem(
+        self,
+        mapping: MutableMapping[str, object],
+        key: str,
+        value: object,
+    ) -> None: ...
+
+    def setattr(
+        self,
+        obj: object,
+        name: str,
+        value: object,
+        raising: bool = ...,
+    ) -> None: ...
+
+    def delenv(self, name: str, raising: bool = ...) -> None: ...
+
+    def setenv(self, name: str, value: str) -> None: ...
+
+
 pypi_module = importlib.import_module("x_make_pypi_x.x_cls_make_pypi_x")
+
+
+def _raise_failure(message: str) -> NoReturn:
+    failure_message = message
+    raise AssertionError(failure_message)
+
+
+def expect(*, condition: bool, message: str) -> None:
+    if not condition:
+        _raise_failure(message)
+
+
+_PrimeCredentials = Callable[[str], str]
+
+
+def _invoke_prime_twine_credentials(token_env: str) -> str:
+    prime_callable = cast(
+        "_PrimeCredentials",
+        publish_flow._prime_twine_credentials,
+    )
+    return prime_callable(token_env)
 
 
 def _iso(dt: datetime) -> str:
@@ -74,7 +124,7 @@ def _run_report_payload(repo_root: Path) -> dict[str, object]:
     }
 
 
-def _install_fake_publisher(monkeypatch: pytest.MonkeyPatch, module_name: str) -> None:
+def _install_fake_publisher(monkeypatch: SupportsMonkeyPatch, module_name: str) -> None:
     fake_module = ModuleType(module_name)
 
     class FakePublisher:
@@ -87,8 +137,12 @@ def _install_fake_publisher(monkeypatch: pytest.MonkeyPatch, module_name: str) -
             self.ancillary = ancillary_rel_paths
             return True
 
-    fake_module.FakePublisher = FakePublisher
-    monkeypatch.setitem(sys.modules, module_name, fake_module)
+    fake_module.__dict__["FakePublisher"] = FakePublisher
+    monkeypatch.setitem(
+        cast("MutableMapping[str, object]", sys.modules),
+        module_name,
+        fake_module,
+    )
 
 
 def _payload(template_repo_root: Path, publisher_identifier: str) -> dict[str, object]:
@@ -126,7 +180,7 @@ class _PublishCall:
     token_env: str
 
 
-def test_main_json_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_main_json_success(monkeypatch: SupportsMonkeyPatch, tmp_path: Path) -> None:
     module_name = "tests.fake_publisher"
     _install_fake_publisher(monkeypatch, module_name)
 
@@ -134,14 +188,29 @@ def test_main_json_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
 
     def fake_publish(
         entries: Sequence[object],
-        *,
-        cloner: object,
-        ctx: object | None,
-        repo_parent_root: str,
-        publisher_factory: PublisherFactory,
-        token_env: str,
+        **kwargs: object,
     ) -> tuple[dict[str, str | None], dict[str, dict[str, object]], Path]:
         nonlocal captured_call
+        cloner = kwargs.get("cloner")
+        ctx = kwargs.get("ctx")
+        repo_parent_root_obj = kwargs.get("repo_parent_root")
+        publisher_factory_obj = kwargs.get("publisher_factory")
+        token_env_obj = kwargs.get("token_env")
+        expect(
+            condition=isinstance(repo_parent_root_obj, str),
+            message="repo_parent_root missing",
+        )
+        expect(
+            condition=isinstance(token_env_obj, str),
+            message="token_env missing",
+        )
+        expect(
+            condition=callable(publisher_factory_obj),
+            message="publisher_factory missing",
+        )
+        repo_parent_root = cast("str", repo_parent_root_obj)
+        token_env = cast("str", token_env_obj)
+        publisher_factory = cast("PublisherFactory", publisher_factory_obj)
         captured_call = _PublishCall(
             entries=tuple(entries),
             cloner=cloner,
@@ -168,29 +237,61 @@ def test_main_json_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
 
     validate_payload(result, OUTPUT_SCHEMA)
 
-    assert captured_call is not None
+    if captured_call is None:
+        _raise_failure("publish_manifest_entries was not invoked")
+
+    parameters_obj = cast("Mapping[str, object]", payload["parameters"])
+    expected_token_env = cast("str", parameters_obj["token_env"])
     entries = list(captured_call.entries)
-    assert entries
+    expect(condition=bool(entries), message="No manifest entries captured")
     first_entry = entries[0]
     package_attr = getattr(first_entry, "package", None)
-    assert isinstance(package_attr, str)
-    assert package_attr == "demo_pkg"
+    expect(
+        condition=isinstance(package_attr, str),
+        message="Captured entry missing package attribute",
+    )
+    expect(condition=package_attr == "demo_pkg", message="Unexpected package name")
+
     ctx = captured_call.ctx
-    assert isinstance(ctx, SimpleNamespace)
-    assert getattr(ctx, "dry_run", False) is True
-    assert isinstance(captured_call.cloner, SimpleNamespace)
-    assert captured_call.repo_parent_root == str(tmp_path)
-    assert captured_call.token_env == "CUSTOM_ENV"
+    expect(
+        condition=isinstance(ctx, SimpleNamespace),
+        message="Context should be a SimpleNamespace",
+    )
+    ctx_namespace = cast("SimpleNamespace", ctx)
+    expect(
+        condition=getattr(ctx_namespace, "dry_run", False) is True,
+        message="Context missing dry_run flag",
+    )
+    expect(
+        condition=isinstance(captured_call.cloner, SimpleNamespace),
+        message="Cloner should be a SimpleNamespace",
+    )
+    expect(
+        condition=captured_call.repo_parent_root == str(tmp_path),
+        message="Incorrect repo parent root",
+    )
+    expect(
+        condition=captured_call.token_env == expected_token_env,
+        message="Unexpected token env value",
+    )
+
     publisher_factory_obj: Callable[..., object] = captured_call.publisher_factory
-    assert callable(publisher_factory_obj)
-    assert getattr(publisher_factory_obj, "__name__", "") == "FakePublisher"
+    expect(
+        condition=callable(publisher_factory_obj),
+        message="Publisher factory not callable",
+    )
+    expect(
+        condition=getattr(publisher_factory_obj, "__name__", "") == "FakePublisher",
+        message="Publisher factory override not applied",
+    )
+
     status_value = result.get("status")
-    assert isinstance(status_value, str)
-    assert status_value == "completed"
+    expect(condition=isinstance(status_value, str), message="Status must be a string")
+    expect(condition=status_value == "completed", message="Expected completed status")
 
 
 def test_main_json_publish_failure(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: SupportsMonkeyPatch, tmp_path: Path
 ) -> None:
     def failing_publish(
         *_args: object, **_kwargs: object
@@ -208,46 +309,79 @@ def test_main_json_publish_failure(
     validate_payload(result, ERROR_SCHEMA)
 
     details_obj = result.get("details")
-    assert isinstance(details_obj, Mapping)
-    assert "run_report_path" in details_obj
+    expect(
+        condition=isinstance(details_obj, Mapping),
+        message="Failure details missing mapping payload",
+    )
+    details_mapping = cast("Mapping[str, object]", details_obj)
+    expect(
+        condition="run_report_path" in details_mapping,
+        message="Missing run report path in failure details",
+    )
 
 
 def test_main_json_rejects_invalid_payload() -> None:
     result = main_json({})
     validate_payload(result, ERROR_SCHEMA)
     status_value = result.get("status")
-    assert isinstance(status_value, str)
-    assert status_value == "failure"
+    expect(condition=isinstance(status_value, str), message="Status must be a string")
+    expect(condition=status_value == "failure", message="Invalid payload should fail")
 
 
 def test_prime_twine_credentials_sets_username_and_password(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: SupportsMonkeyPatch,
 ) -> None:
-    token_value = "pypi-AgENdGVzdC10b2tlbg"  # noqa: S105 - test token fixture
+    token_value = uuid.uuid4().hex
     monkeypatch.delenv("TWINE_API_TOKEN", raising=False)
     monkeypatch.delenv("TWINE_USERNAME", raising=False)
     monkeypatch.delenv("TWINE_PASSWORD", raising=False)
     custom_env = "CUSTOM_TOKEN_ENV"
     monkeypatch.setenv(custom_env, token_value)
 
-    selected = publish_flow._prime_twine_credentials(custom_env)
+    selected = _invoke_prime_twine_credentials(custom_env)
 
-    assert selected == custom_env
-    assert os.environ["TWINE_API_TOKEN"] == token_value
-    assert os.environ["TWINE_USERNAME"] == "__token__"
-    assert os.environ["TWINE_PASSWORD"] == token_value
+    expect(
+        condition=selected == custom_env,
+        message="Custom token environment should be selected",
+    )
+    expect(
+        condition=os.environ["TWINE_API_TOKEN"] == token_value,
+        message="Token environment should copy the token value",
+    )
+    expect(
+        condition=os.environ["TWINE_USERNAME"] == "__token__",
+        message="Twine username should default to __token__",
+    )
+    expect(
+        condition=os.environ["TWINE_PASSWORD"] == token_value,
+        message="Twine password should mirror the token value",
+    )
 
 
 def test_prime_twine_credentials_preserves_existing_user(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: SupportsMonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TWINE_API_TOKEN", "existing")
+    existing_token = uuid.uuid4().hex
+    existing_password = uuid.uuid4().hex
+    monkeypatch.setenv("TWINE_API_TOKEN", existing_token)
     monkeypatch.setenv("TWINE_USERNAME", "custom-user")
-    monkeypatch.setenv("TWINE_PASSWORD", "custom-pass")
+    monkeypatch.setenv("TWINE_PASSWORD", existing_password)
 
-    selected = publish_flow._prime_twine_credentials("")
+    selected = _invoke_prime_twine_credentials("")
 
-    assert selected == "TWINE_API_TOKEN"
-    assert os.environ["TWINE_API_TOKEN"] == "existing"
-    assert os.environ["TWINE_USERNAME"] == "__token__"
-    assert os.environ["TWINE_PASSWORD"] == "existing"
+    expect(
+        condition=selected == "TWINE_API_TOKEN",
+        message="Existing TWINE_API_TOKEN should remain preferred",
+    )
+    expect(
+        condition=os.environ["TWINE_API_TOKEN"] == existing_token,
+        message="Existing token should remain unchanged",
+    )
+    expect(
+        condition=os.environ["TWINE_USERNAME"] == "__token__",
+        message="Twine username should still default to __token__",
+    )
+    expect(
+        condition=os.environ["TWINE_PASSWORD"] == existing_token,
+        message="Twine password should mirror the token when present",
+    )

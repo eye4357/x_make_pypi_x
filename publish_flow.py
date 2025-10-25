@@ -11,8 +11,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from os import PathLike
 from pathlib import Path
-from types import ModuleType
 from typing import TYPE_CHECKING, Protocol, cast
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 try:  # pragma: no cover - platform dependent
     import winreg as _winreg
@@ -85,7 +87,7 @@ def _decode_winreg_value(raw_value: object) -> str:
     return str(raw_value)
 
 
-def _prime_twine_credentials(token_env: str) -> str | None:
+def _resolve_twine_token(token_env: str) -> tuple[str | None, str | None]:
     token_sources: list[str] = []
     if token_env:
         token_sources.append(token_env)
@@ -99,27 +101,27 @@ def _prime_twine_credentials(token_env: str) -> str | None:
         ]
     )
 
-    selected_source: str | None = None
-    token_value = os.environ.get("TWINE_API_TOKEN", "").strip() or None
-    if token_value:
-        selected_source = "TWINE_API_TOKEN"
-    else:
-        for source in token_sources:
-            candidate = _read_user_env_var(source)
-            if candidate:
-                os.environ["TWINE_API_TOKEN"] = candidate
-                token_value = candidate
-                selected_source = source
-                _info(f"Hydrated Twine API token from {source}.")
-                break
+    existing = os.environ.get("TWINE_API_TOKEN", "").strip() or None
+    if existing:
+        return "TWINE_API_TOKEN", existing
 
+    for source in token_sources:
+        candidate = _read_user_env_var(source)
+        if candidate:
+            os.environ["TWINE_API_TOKEN"] = candidate
+            _info(f"Hydrated Twine API token from {source}.")
+            return source, candidate
+
+    return None, None
+
+
+def _hydrate_secondary_credentials() -> None:
     credential_pairs: tuple[tuple[str, tuple[str, ...]], ...] = (
         ("TWINE_USERNAME", ("PYPI_USERNAME", "TESTPYPI_USERNAME")),
         ("TWINE_PASSWORD", ("PYPI_PASSWORD", "TESTPYPI_PASSWORD")),
     )
     for target, sources in credential_pairs:
-        target_present = bool(os.environ.get(target, "").strip())
-        if target_present:
+        if os.environ.get(target, "").strip():
             continue
         for source in sources:
             candidate = _read_user_env_var(source)
@@ -128,20 +130,27 @@ def _prime_twine_credentials(token_env: str) -> str | None:
                 _info(f"Hydrated {target} from {source}.")
                 break
 
+
+def _configure_repository(selected_source: str | None) -> None:
+    repository_env = "TWINE_REPOSITORY_URL"
+    if os.environ.get(repository_env, "").strip():
+        return
+    if selected_source and "test" in selected_source.lower():
+        os.environ[repository_env] = "https://test.pypi.org/legacy/"
+        _info("Configured Twine repository for TestPyPI uploads.")
+
+
+def _prime_twine_credentials(token_env: str) -> str | None:
+    selected_source, token_value = _resolve_twine_token(token_env)
+
+    _hydrate_secondary_credentials()
+
     if token_value:
-        username_env = "TWINE_USERNAME"
-        password_env = "TWINE_PASSWORD"
-        os.environ[username_env] = "__token__"
-        os.environ[password_env] = token_value
+        os.environ["TWINE_USERNAME"] = "__token__"
+        os.environ["TWINE_PASSWORD"] = token_value
         _info("Configured Twine token-based username and password.")
 
-    repository_env = "TWINE_REPOSITORY_URL"
-    repo_present = bool(os.environ.get(repository_env, "").strip())
-    if not repo_present and selected_source:
-        if "test" in selected_source.lower():
-            os.environ[repository_env] = "https://test.pypi.org/legacy/"
-            _info("Configured Twine repository for TestPyPI uploads.")
-
+    _configure_repository(selected_source)
     return selected_source
 
 
