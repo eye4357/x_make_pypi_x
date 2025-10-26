@@ -35,7 +35,6 @@ from x_make_pypi_x.publish_flow import PublisherFactory, publish_manifest_entrie
 _LOGGER = logging.getLogger("x_make")
 _T = TypeVar("_T")
 
-ValidationErrorType = cast("type[Exception]", ValidationError)
 _EMPTY_MAPPING: Mapping[str, object] = MappingProxyType({})
 
 
@@ -79,9 +78,10 @@ def _ctx_flag(ctx: object | None, attr: str, *, default: bool = False) -> bool:
     if ctx is None:
         return default
     try:
-        value = cast("object", getattr(ctx, attr))
+        value_obj: object = getattr(ctx, attr)
     except (AttributeError, RuntimeError, ValueError, TypeError):
         return default
+    value = value_obj
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
@@ -545,7 +545,7 @@ def _failure_payload(
     payload: dict[str, object] = {"status": "failure", "message": message}
     if details:
         payload["details"] = {str(key): value for key, value in details.items()}
-    with suppress(ValidationErrorType):
+    with suppress(ValidationError):
         validate_payload(payload, ERROR_SCHEMA)
     return payload
 
@@ -636,7 +636,7 @@ def _resolve_publisher_factory(identifier: str | None) -> PublisherFactory:
     else:
         module_name, attr_name = "x_make_pypi_x.x_cls_make_pypi_x", cleaned
     module = importlib.import_module(module_name)
-    candidate = getattr(module, attr_name)
+    candidate = cast("object", getattr(module, attr_name))
     if not callable(candidate):
         message = f"publisher_factory '{identifier}' did not resolve to a callable"
         raise TypeError(message)
@@ -773,14 +773,14 @@ def main_json(  # noqa: PLR0911 - routing handles multiple exit paths explicitly
         )
     except Exception as exc:  # noqa: BLE001
         details: dict[str, object] = {"error": str(exc)}
-        report_path_obj = getattr(exc, "run_report_path", None)
+        report_path_obj = cast("object | None", getattr(exc, "run_report_path", None))
         if isinstance(report_path_obj, Path):
             details["run_report_path"] = str(report_path_obj)
         return _failure_payload("publishing manifest entries failed", details=details)
 
     try:
         report_text = Path(report_path).read_text(encoding="utf-8")
-        result_payload_obj = json.loads(report_text)
+        result_payload_raw: object = json.loads(report_text)
     except (OSError, json.JSONDecodeError) as exc:
         return _failure_payload(
             "failed to read run report",
@@ -790,14 +790,17 @@ def main_json(  # noqa: PLR0911 - routing handles multiple exit paths explicitly
             },
         )
 
-    if not isinstance(result_payload_obj, Mapping):
+    if not isinstance(result_payload_raw, Mapping):
         return _failure_payload(
             "run report did not contain a JSON object",
             details={"report_path": str(report_path)},
         )
 
-    result_payload = {str(key): value for key, value in result_payload_obj.items()}
-    result_payload.setdefault("errors", [])
+    typed_result_mapping = cast("Mapping[str, object]", result_payload_raw)
+    result_payload = dict(typed_result_mapping.items())
+    errors_obj = result_payload.get("errors")
+    if not isinstance(errors_obj, list):
+        result_payload["errors"] = cast("list[object]", [])
 
     outputs: dict[str, object] = dict(result_payload)
     try:
@@ -820,7 +823,8 @@ def _load_json_payload(file_path: str | None) -> Mapping[str, object]:
         if not isinstance(payload_obj, Mapping):
             message = "JSON payload must be a mapping"
             raise TypeError(message)
-        typed_payload = {str(key): value for key, value in payload_obj.items()}
+        payload_mapping = cast("Mapping[str, object]", payload_obj)
+        typed_payload = {str(key): value for key, value in payload_mapping.items()}
         return MappingProxyType(typed_payload)
 
     if file_path:
@@ -837,10 +841,14 @@ def _run_json_cli(args: Sequence[str]) -> None:
     parser.add_argument("--json-file", type=str, help="Path to JSON payload file")
     parsed = parser.parse_args(args)
 
-    if not (parsed.json or parsed.json_file):
+    json_flag_source: object = getattr(parsed, "json", False)
+    json_flag = bool(json_flag_source)
+    json_file_arg = cast("str | None", getattr(parsed, "json_file", None))
+
+    if not (json_flag or json_file_arg):
         parser.error("JSON input required. Use --json for stdin or --json-file <path>.")
 
-    payload = _load_json_payload(parsed.json_file if parsed.json_file else None)
+    payload = _load_json_payload(json_file_arg if json_file_arg else None)
     result = main_json(payload)
     json.dump(result, sys.stdout, indent=2)
     sys.stdout.write("\n")

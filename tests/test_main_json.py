@@ -17,6 +17,8 @@ from x_make_pypi_x import publish_flow
 from x_make_pypi_x.json_contracts import ERROR_SCHEMA, OUTPUT_SCHEMA
 from x_make_pypi_x.x_cls_make_pypi_x import main_json
 
+_SIMPLE_NAMESPACE_TYPE = type(SimpleNamespace())
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -40,10 +42,11 @@ class SupportsMonkeyPatch(Protocol):
         obj: object,
         name: str,
         value: object,
+        *,
         raising: bool = ...,
     ) -> None: ...
 
-    def delenv(self, name: str, raising: bool = ...) -> None: ...
+    def delenv(self, name: str, *, raising: bool = ...) -> None: ...
 
     def setenv(self, name: str, value: str) -> None: ...
 
@@ -67,7 +70,7 @@ _PrimeCredentials = Callable[[str], str]
 def _invoke_prime_twine_credentials(token_env: str) -> str:
     prime_callable = cast(
         "_PrimeCredentials",
-        publish_flow._prime_twine_credentials,
+        publish_flow._prime_twine_credentials,  # noqa: SLF001
     )
     return prime_callable(token_env)
 
@@ -137,7 +140,7 @@ def _install_fake_publisher(monkeypatch: SupportsMonkeyPatch, module_name: str) 
             self.ancillary = ancillary_rel_paths
             return True
 
-    fake_module.__dict__["FakePublisher"] = FakePublisher
+    fake_module.FakePublisher = FakePublisher  # type: ignore[attr-defined]
     monkeypatch.setitem(
         cast("MutableMapping[str, object]", sys.modules),
         module_name,
@@ -178,6 +181,62 @@ class _PublishCall:
     repo_parent_root: str
     publisher_factory: PublisherFactory
     token_env: str
+
+
+def _assert_publish_call(
+    captured: _PublishCall,
+    result: Mapping[str, object],
+    repo_root: Path,
+    expected_token_env: str,
+) -> None:
+    entries = list(captured.entries)
+    expect(condition=bool(entries), message="No manifest entries captured")
+    first_entry = entries[0]
+    package_attr: object = getattr(first_entry, "package", None)
+    expect(
+        condition=isinstance(package_attr, str),
+        message="Captured entry missing package attribute",
+    )
+    package_name = cast("str", package_attr)
+    expect(condition=package_name == "demo_pkg", message="Unexpected package name")
+
+    ctx = captured.ctx
+    expect(
+        condition=isinstance(ctx, _SIMPLE_NAMESPACE_TYPE),
+        message="Context should be a SimpleNamespace",
+    )
+    ctx_namespace = cast("SimpleNamespace", ctx)
+    dry_run_attr: object = getattr(ctx_namespace, "dry_run", False)
+    expect(
+        condition=isinstance(dry_run_attr, bool),
+        message="Context dry_run flag must be boolean",
+    )
+    expect(
+        condition=cast("bool", dry_run_attr) is True,
+        message="Context missing dry_run flag",
+    )
+    expect(
+        condition=isinstance(captured.cloner, _SIMPLE_NAMESPACE_TYPE),
+        message="Cloner should be a SimpleNamespace",
+    )
+    expect(
+        condition=captured.repo_parent_root == str(repo_root),
+        message="Incorrect repo parent root",
+    )
+    expect(
+        condition=captured.token_env == expected_token_env,
+        message="Unexpected token env value",
+    )
+
+    name_attr: object = getattr(captured.publisher_factory, "__name__", "")
+    expect(
+        condition=isinstance(name_attr, str) and name_attr == "FakePublisher",
+        message="Publisher factory override not applied",
+    )
+
+    status_value = result.get("status")
+    expect(condition=isinstance(status_value, str), message="Status must be a string")
+    expect(condition=status_value == "completed", message="Expected completed status")
 
 
 def test_main_json_success(monkeypatch: SupportsMonkeyPatch, tmp_path: Path) -> None:
@@ -242,52 +301,12 @@ def test_main_json_success(monkeypatch: SupportsMonkeyPatch, tmp_path: Path) -> 
 
     parameters_obj = cast("Mapping[str, object]", payload["parameters"])
     expected_token_env = cast("str", parameters_obj["token_env"])
-    entries = list(captured_call.entries)
-    expect(condition=bool(entries), message="No manifest entries captured")
-    first_entry = entries[0]
-    package_attr = getattr(first_entry, "package", None)
-    expect(
-        condition=isinstance(package_attr, str),
-        message="Captured entry missing package attribute",
+    _assert_publish_call(
+        captured_call,
+        result,
+        tmp_path,
+        expected_token_env,
     )
-    expect(condition=package_attr == "demo_pkg", message="Unexpected package name")
-
-    ctx = captured_call.ctx
-    expect(
-        condition=isinstance(ctx, SimpleNamespace),
-        message="Context should be a SimpleNamespace",
-    )
-    ctx_namespace = cast("SimpleNamespace", ctx)
-    expect(
-        condition=getattr(ctx_namespace, "dry_run", False) is True,
-        message="Context missing dry_run flag",
-    )
-    expect(
-        condition=isinstance(captured_call.cloner, SimpleNamespace),
-        message="Cloner should be a SimpleNamespace",
-    )
-    expect(
-        condition=captured_call.repo_parent_root == str(tmp_path),
-        message="Incorrect repo parent root",
-    )
-    expect(
-        condition=captured_call.token_env == expected_token_env,
-        message="Unexpected token env value",
-    )
-
-    publisher_factory_obj: Callable[..., object] = captured_call.publisher_factory
-    expect(
-        condition=callable(publisher_factory_obj),
-        message="Publisher factory not callable",
-    )
-    expect(
-        condition=getattr(publisher_factory_obj, "__name__", "") == "FakePublisher",
-        message="Publisher factory override not applied",
-    )
-
-    status_value = result.get("status")
-    expect(condition=isinstance(status_value, str), message="Status must be a string")
-    expect(condition=status_value == "completed", message="Expected completed status")
 
 
 def test_main_json_publish_failure(
@@ -298,7 +317,7 @@ def test_main_json_publish_failure(
     ) -> tuple[dict[str, str | None], dict[str, dict[str, object]], Path]:
         report_path = tmp_path / "reports" / "failed.json"
         exc = RuntimeError("publish boom")
-        exc.__dict__["run_report_path"] = report_path
+        exc.run_report_path = report_path  # type: ignore[attr-defined]
         raise exc
 
     monkeypatch.setattr(pypi_module, "publish_manifest_entries", failing_publish)

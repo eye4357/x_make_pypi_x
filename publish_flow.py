@@ -6,22 +6,12 @@ import subprocess
 import time
 import uuid
 from collections.abc import Mapping, Sequence
-from contextlib import chdir, suppress
+from contextlib import AbstractContextManager, chdir, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from os import PathLike
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
-
-if TYPE_CHECKING:
-    from types import ModuleType
-
-try:  # pragma: no cover - platform dependent
-    import winreg as _winreg
-except ModuleNotFoundError:  # pragma: no cover - non-Windows
-    winreg: ModuleType | None = None
-else:
-    winreg = _winreg
 
 from x_make_common_x import (
     HttpClient,
@@ -31,6 +21,27 @@ from x_make_common_x import (
     log_info,
     write_run_report,
 )
+
+
+class _WinRegModule(Protocol):
+    HKEY_CURRENT_USER: int
+    REG_EXPAND_SZ: int
+
+    def OpenKey(  # noqa: N802
+        self, key: int, sub_key: str
+    ) -> AbstractContextManager[object]: ...
+
+    def QueryValueEx(  # noqa: N802
+        self, key: object, value_name: str
+    ) -> tuple[object, int]: ...
+
+
+try:  # pragma: no cover - platform dependent
+    import winreg as _winreg
+except ModuleNotFoundError:  # pragma: no cover - non-Windows
+    winreg: _WinRegModule | None = None
+else:
+    winreg = cast("_WinRegModule", _winreg)
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 
@@ -66,12 +77,12 @@ def _read_windows_user_env(name: str) -> str | None:
         return None
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
-            raw_value_obj, value_type = winreg.QueryValueEx(key, name)
+            raw_value_obj, raw_value_type = winreg.QueryValueEx(key, name)
     except (FileNotFoundError, OSError):
         return None
 
     value = _decode_winreg_value(raw_value_obj)
-    if int(value_type) == getattr(winreg, "REG_EXPAND_SZ", object()):
+    if int(raw_value_type) == getattr(winreg, "REG_EXPAND_SZ", object()):
         value = os.path.expandvars(value)
     return value.strip() or None
 
