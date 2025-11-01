@@ -52,11 +52,6 @@ This foundry crafts the wheels and sdists we ship to PyPI. It mirrors the target
 | Static contract scan | `python -m pyright` |
 | Functional verification | `pytest` *(for local package tests)* |
 
-## System Linkage
-- [Changelog](./CHANGELOG.md)
-- [Road to 0.20.4 Engineering Proposal](../x_0_make_all_x/Change%20Control/0.20.4/Road%20to%200.20.4%20Engineering%20Proposal.md)
-- [Road to 0.20.3 Engineering Proposal](../x_0_make_all_x/Change%20Control/0.20.3/Road%20to%200.20.3%20Engineering%20Proposal.md)
-
 ## Reconstitution Drill
 During the monthly rebuild I reinstall `build` and `twine`, execute a dry-run upload to TestPyPI, and confirm the artefact manifest still wires into the orchestrator summary. Tool versions, runtimes, and credential checks get logged; any deviation triggers documentation updates and Change Control entries.
 
